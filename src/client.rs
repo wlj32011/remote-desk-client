@@ -390,6 +390,11 @@ impl Client {
         debug_assert!(peer == interface.get_id());
         interface.update_direct(None);
         interface.update_received(false);
+        // bilin: 我们的 hbbs（开源版）不做服务端密钥交换。带登录 token 时客户端会先等 KeyExchange，
+        // 等不到就 "Failed to secure tcp: deadline has elapsed"，登录后就连不上了；token 也只有 Pro 版 hbbs 用，
+        // 明文发给 hbbs 还有泄露风险。所以这里不把 token 带进打洞/中转请求。服务端补上密钥交换后再放开。
+        let _ = token;
+        let token = "";
         match Self::_start(peer, key, token, conn_type, interface.clone()).await {
             Err(err) => {
                 let err_str = err.to_string();

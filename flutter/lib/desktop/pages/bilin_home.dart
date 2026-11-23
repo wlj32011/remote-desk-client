@@ -11,8 +11,7 @@ import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/widgets/peer_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart'
     show OnlineStatusWidget;
-import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
-import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/pages/bilin_pages.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
@@ -71,6 +70,9 @@ Widget bilinTitle(BuildContext context, String text, {double size = 20}) {
   );
 }
 
+/// 当前页：0 远程协助，1 设备列表，2 设置
+final RxInt bilinNav = 0.obs;
+
 /// 主页整体：左导航 + 内容区。[notice] 是 RustDesk 原有的安装/权限/更新提示卡片，原样放在内容区顶部。
 class BilinHome extends StatefulWidget {
   final Widget? notice;
@@ -81,7 +83,6 @@ class BilinHome extends StatefulWidget {
 }
 
 class _BilinHomeState extends State<BilinHome> {
-  final RxInt _nav = 0.obs;
 
   @override
   void initState() {
@@ -89,7 +90,9 @@ class _BilinHomeState extends State<BilinHome> {
     bilinLoadMode();
     // 仅被控模式下回到“远程协助”页
     ever(bilinMode, (_) {
-      if (bilinMode.value == 'incoming') _nav.value = 0;
+      if (bilinMode.value == 'incoming' && bilinNav.value == 1) {
+        bilinNav.value = 0;
+      }
     });
   }
 
@@ -106,12 +109,13 @@ class _BilinHomeState extends State<BilinHome> {
               children: [
                 Expanded(
                   child: Obx(() => IndexedStack(
-                        index: _nav.value,
+                        index: bilinNav.value,
                         children: [
                           _AssistPage(
                               notice: widget.notice,
-                              onShowAll: () => _nav.value = 1),
-                          const _DevicesPage(),
+                              onShowAll: () => bilinNav.value = 1),
+                          const BilinDevicesPage(),
+                          BilinSettingsPage(onBack: () => bilinNav.value = 0),
                         ],
                       )),
                 ),
@@ -161,21 +165,15 @@ class _BilinHomeState extends State<BilinHome> {
           const Spacer(),
           const _AccountButton(),
           const SizedBox(height: 4),
-          _sideButton(context, Icons.settings_outlined, '设置', () {
-            if (DesktopSettingPage.tabKeys.isNotEmpty) {
-              DesktopSettingPage.switch2page(DesktopSettingPage.tabKeys[0]);
-            } else {
-              DesktopTabPage.onAddSetting();
-            }
-          }),
+          _navItem(context, 2, Icons.settings_outlined, '设置'),
         ],
       ),
     );
   }
 
   Widget _navItem(BuildContext context, int index, IconData icon, String label) {
-    return Obx(() => _sideButton(context, icon, label, () => _nav.value = index,
-        selected: _nav.value == index));
+    return Obx(() => _sideButton(context, icon, label, () => bilinNav.value = index,
+        selected: bilinNav.value == index));
   }
 
   Widget _sideButton(
@@ -213,10 +211,10 @@ class _BilinHomeState extends State<BilinHome> {
 }
 
 /// 白色圆角卡片
-class _Card extends StatelessWidget {
+class BilinCard extends StatelessWidget {
   final Widget child;
   final EdgeInsets padding;
-  const _Card(
+  const BilinCard(
       {required this.child,
       this.padding = const EdgeInsets.fromLTRB(24, 22, 24, 24)});
 
@@ -307,7 +305,7 @@ class _LocalCard extends StatelessWidget {
       child: Consumer<ServerModel>(builder: (context, model, _) {
         final showOneTime = model.approveMode != 'click' &&
             model.verificationMethod != kUsePermanentPassword;
-        return _Card(
+        return BilinCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -492,8 +490,10 @@ class _PasswordFieldState extends State<_PasswordField> {
                 }),
               ],
               if (!widget.showOneTime && !bind.isDisableSettings())
-                _IconBtn(Icons.edit_outlined, '修改密码',
-                    () => DesktopSettingPage.switch2page(SettingsTabKey.safety)),
+                _IconBtn(Icons.edit_outlined, '修改密码', () {
+                  bilinSettingsSection.value = 'safety';
+                  bilinNav.value = 2;
+                }),
             ],
           ),
         ],
@@ -535,7 +535,7 @@ class _RemoteCardState extends State<_RemoteCard> {
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(12);
-    return _Card(
+    return BilinCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -667,7 +667,7 @@ class _RecentRowState extends State<_RecentRow> {
             ),
             const SizedBox(height: 12),
             if (peers.isEmpty)
-              _Card(
+              BilinCard(
                 padding: const EdgeInsets.symmetric(vertical: 34),
                 child: Center(
                   child: Text('还没有连接过的设备，输入对方识别码开始第一次远程吧',
@@ -720,7 +720,7 @@ class _PeerCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: () => connect(context, peer.id),
-        child: _Card(
+        child: BilinCard(
           padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
           child: Row(
             children: [
@@ -768,124 +768,6 @@ class _PeerCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 「设备列表」页：同一账号登录过的电脑（来自账号后台 /api/peers）
-class _DevicesPage extends StatefulWidget {
-  const _DevicesPage();
-
-  @override
-  State<_DevicesPage> createState() => _DevicesPageState();
-}
-
-class _DevicesPageState extends State<_DevicesPage> {
-  @override
-  void initState() {
-    super.initState();
-    if (gFFI.userModel.isLogin) {
-      gFFI.groupModel.pull(force: true, quiet: true);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
-      child: Obx(() {
-        final loggedIn = gFFI.userModel.userName.value.isNotEmpty;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                bilinTitle(context, '我的设备'),
-                const Spacer(),
-                if (loggedIn)
-                  TextButton.icon(
-                    onPressed: () =>
-                        gFFI.groupModel.pull(force: true, quiet: false),
-                    icon: const Icon(Icons.refresh_rounded, size: 18),
-                    label: const Text('刷新'),
-                    style: TextButton.styleFrom(
-                        foregroundColor: BilinColors.brand),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Expanded(
-              child: loggedIn
-                  ? _myDevices(context)
-                  : _Card(
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.devices_outlined,
-                                size: 56, color: BilinColors.sub(context)),
-                            const SizedBox(height: 14),
-                            Text('登录账号后，用同一账号登录的电脑会自动出现在这里，点一下就能连接',
-                                style: TextStyle(
-                                    fontSize: 14,
-                                    color: BilinColors.sub(context))),
-                            const SizedBox(height: 18),
-                            SizedBox(
-                              width: 160,
-                              height: 44,
-                              child: ElevatedButton(
-                                onPressed: () => showBilinLoginDialog(context),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: BilinColors.brand,
-                                  foregroundColor: Colors.white,
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12)),
-                                ),
-                                child: const Text('登录 / 注册',
-                                    style: TextStyle(fontSize: 15)),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-            ),
-          ],
-        );
-      }),
-    );
-  }
-
-  Widget _myDevices(BuildContext context) {
-    return ChangeNotifierProvider.value(
-      value: gFFI.groupModel.peersModel,
-      child: Consumer<Peers>(builder: (context, model, _) {
-        final myId = gFFI.serverModel.serverId.text.replaceAll(' ', '');
-        final peers = model.peers.where((p) => p.id != myId).toList();
-        if (peers.isNotEmpty && model.event == UpdateEvent.load) {
-          bind.queryOnlines(ids: peers.map((p) => p.id).toList());
-        }
-        if (peers.isEmpty) {
-          return _Card(
-            child: Center(
-              child: Text('这个账号下还没有其他电脑。在别的电脑上安装比邻远程并登录同一账号即可',
-                  style:
-                      TextStyle(fontSize: 14, color: BilinColors.sub(context))),
-            ),
-          );
-        }
-        return LayoutBuilder(builder: (context, c) {
-          final cols = (c.maxWidth / 300).floor().clamp(1, 4);
-          return GridView.count(
-            crossAxisCount: cols,
-            mainAxisSpacing: 14,
-            crossAxisSpacing: 14,
-            childAspectRatio: 2.4,
-            children: [for (final p in peers) _PeerCard(peer: p)],
-          );
-        });
-      }),
     );
   }
 }
