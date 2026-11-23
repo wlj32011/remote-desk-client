@@ -368,7 +368,6 @@ Widget buildConnectionCard(Client client) {
       key: ValueKey(client.id),
       children: [
         _CmHeader(client: client),
-        if (!client.disconnected) _BilinFraudBanner(client: client),
         client.type_() == ClientType.file ||
                 client.type_() == ClientType.portForward ||
                 client.type_() == ClientType.terminal ||
@@ -1079,18 +1078,12 @@ class _CmControlPanel extends StatelessWidget {
                 key: kOptionHideElevateButtonInAcceptWindow) !=
             'Y';
     final showAccept = model.approveMode != 'password';
-    // bilin: 接受按钮先锁几秒，逼用户看完防骗提示
-    return _BilinAcceptCountdown(
-        clientId: client.id,
-        builder: (remaining) => Column(
+    return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         Offstage(
           offstage: !showElevation || !showAccept,
-          child: buildButton(context,
-              color: remaining > 0 ? Colors.green[700]!.withOpacity(0.4) : Colors.green[700],
-              onClick: () {
-            if (remaining > 0) return;
+          child: buildButton(context, color: Colors.green[700], onClick: () {
             handleAccept(context);
             handleElevate(context);
             windowManager.minimize();
@@ -1113,17 +1106,12 @@ class _CmControlPanel extends StatelessWidget {
                   children: [
                     buildButton(
                       context,
-                      color: remaining > 0
-                          ? MyTheme.accent.withOpacity(0.4)
-                          : MyTheme.accent,
+                      color: MyTheme.accent,
                       onClick: () {
-                        if (remaining > 0) return;
                         handleAccept(context);
                         windowManager.minimize();
                       },
-                      text: remaining > 0
-                          ? '${translate('Accept')} ($remaining)'
-                          : 'Accept',
+                      text: 'Accept',
                       textColor: Colors.white,
                     ),
                   ],
@@ -1142,7 +1130,7 @@ class _CmControlPanel extends StatelessWidget {
           ],
         ),
       ],
-    ).marginOnly(bottom: buttonBottomMargin));
+    ).marginOnly(bottom: buttonBottomMargin);
   }
 
   Widget buildButton(BuildContext context,
@@ -1475,93 +1463,4 @@ class __FileTransferLogPageState extends State<_FileTransferLogPage> {
           )),
     );
   }
-}
-
-
-// ===== bilin: 防骗 =====
-
-/// 被控端连接窗口里的防骗提示：请求阶段和被控期间都显示。
-class _BilinFraudBanner extends StatelessWidget {
-  final Client client;
-  const _BilinFraudBanner({Key? key, required this.client}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final controlling = client.authorized;
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 6, bottom: 4),
-      padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF1F0),
-        border: Border.all(color: const Color(0xFFFF7875)),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: Color(0xFFE53935), size: 18),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              controlling
-                  ? '你的电脑正在被远程控制。对方若自称客服、警察、银行或领导，要你转账、报验证码，一定是诈骗，请立即点下方“断开连接”。'
-                  : '有人请求控制你的电脑。不认识对方，或对方自称客服、警察、银行、领导的，一律拒绝！',
-              style: const TextStyle(
-                  fontSize: 12, height: 1.35, color: Color(0xFFB71C1C)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-const int _kBilinAcceptDelaySeconds = 5;
-final Map<int, DateTime> _bilinRequestSeen = {};
-
-/// 首次看到某个连接请求起 _kBilinAcceptDelaySeconds 秒内，builder 拿到的 remaining > 0。
-/// 用连接 id 记首次时间，窗口重建不会重新计时。
-class _BilinAcceptCountdown extends StatefulWidget {
-  final int clientId;
-  final Widget Function(int remaining) builder;
-  const _BilinAcceptCountdown(
-      {Key? key, required this.clientId, required this.builder})
-      : super(key: key);
-
-  @override
-  State<_BilinAcceptCountdown> createState() => _BilinAcceptCountdownState();
-}
-
-class _BilinAcceptCountdownState extends State<_BilinAcceptCountdown> {
-  Timer? _timer;
-
-  int get _remaining {
-    final start =
-        _bilinRequestSeen.putIfAbsent(widget.clientId, () => DateTime.now());
-    final r =
-        _kBilinAcceptDelaySeconds - DateTime.now().difference(start).inSeconds;
-    return r < 0 ? 0 : r;
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!mounted) return;
-      final r = _remaining;
-      setState(() {});
-      if (r == 0) _timer?.cancel();
-    });
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => widget.builder(_remaining);
 }

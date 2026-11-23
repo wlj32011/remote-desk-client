@@ -1,7 +1,7 @@
 // 比邻远程：桌面版主页（参考向日葵 / 连连控 / UU 远程的布局重做）
 // 左侧窄导航：远程协助、设备列表、设置；
 // 「远程协助」页：左卡片“允许控制本机”（识别码 + 临时密码），右卡片“控制远程设备”（输入识别码 + 两个大按钮）；
-// 底部常驻防骗提醒和服务状态。只用公开 API（gFFI / bind / connect），不改 RustDesk 的连接逻辑。
+// 底部是服务状态。只用公开 API（gFFI / bind / connect），不改 RustDesk 的连接逻辑。
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
@@ -66,7 +66,6 @@ class _BilinHomeState extends State<BilinHome> {
             child: Column(
               children: [
                 Expanded(child: _AssistPage(notice: widget.notice)),
-                const _FraudTipBar(),
                 Container(
                   color: BilinColors.card(context),
                   child: OnlineStatusWidget(),
@@ -546,9 +545,6 @@ class _RemoteCardState extends State<_RemoteCard> {
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        Text('连接前请确认对方是你认识的人。',
-            style: TextStyle(fontSize: 12, color: BilinColors.sub(context))),
       ],
     );
   }
@@ -568,39 +564,6 @@ class _DevicesPanel extends StatelessWidget {
         border: Border.all(color: BilinColors.border(context)),
       ),
       child: const PeerTabPage(),
-    );
-  }
-}
-
-/// 底部常驻防骗提醒
-class _FraudTipBar extends StatelessWidget {
-  const _FraudTipBar();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
-      color: BilinColors.isDark(context)
-          ? const Color(0xFF3A2E12)
-          : const Color(0xFFFFF7E6),
-      child: Row(
-        children: [
-          const Icon(Icons.shield_outlined, size: 16, color: Color(0xFFE8890C)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '防骗提醒：凡是自称客服、警察、银行、领导，让你下载远程软件、报识别码和密码的，都是诈骗。',
-              style: TextStyle(
-                  fontSize: 12.5,
-                  color: BilinColors.isDark(context)
-                      ? const Color(0xFFF5C26B)
-                      : const Color(0xFF9A5B00)),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
