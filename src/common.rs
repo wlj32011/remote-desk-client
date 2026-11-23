@@ -3643,3 +3643,36 @@ mod tests {
         assert_eq!(decode_id_pk(&signed, &pk).unwrap(), (id, their_pk));
     }
 }
+
+/// bilin: 本机固定密码的哈希（sha256(密码+盐)，base64），写进账号的个人地址簿，
+/// 同账号的其他电脑从设备列表连本机时自动用它登录，不用输密码。
+/// 本机没有固定密码时自动生成一个随机强密码（用户不用知道，想改随时可在“设置-安全”改）。
+pub fn bilin_self_ab_hash() -> String {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        use hbb_common::config::decode_permanent_password_h1_from_storage;
+        let _ = crate::ipc::sync_permanent_password_storage_from_daemon();
+        let (mut storage, _) = Config::get_local_permanent_password_storage_and_salt();
+        if decode_permanent_password_h1_from_storage(&storage).is_none() {
+            if !storage.is_empty() {
+                log::warn!("bilin: permanent password storage not decodable, regenerate");
+            }
+            let pw = Config::get_auto_password(16);
+            if !crate::ui_interface::set_permanent_password_with_result(pw) {
+                log::error!("bilin: failed to set permanent password");
+                return "".to_owned();
+            }
+            let _ = crate::ipc::sync_permanent_password_storage_from_daemon();
+            storage = Config::get_local_permanent_password_storage_and_salt().0;
+        }
+        match decode_permanent_password_h1_from_storage(&storage) {
+            Some(h1) => encode64(h1),
+            None => {
+                log::error!("bilin: cannot decode permanent password hash");
+                "".to_owned()
+            }
+        }
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    "".to_owned()
+}

@@ -872,6 +872,8 @@ message Misc {
     // is rebuilt, and held again, the next time it is shown, before any connection names it
     // by id again, so the shape just selected is always there to give.
     uint64 request_cursor_data = 39;
+    // bilin: 远程关机（同账号设备批量关机用），被控端按“允许远程重启”权限处理
+    bool bilin_shutdown_remote_device = 1000;
   }
 }
 

@@ -3952,6 +3952,15 @@ impl Connection {
                             Some(Instant::now().into()),
                         );
                     }
+                    Some(misc::Union::BilinShutdownRemoteDevice(_)) => {
+                        #[cfg(any(target_os = "linux", target_os = "windows"))]
+                        if self.restart {
+                            match system_shutdown::force_shutdown() {
+                                Ok(_) => log::info!("Shutdown by the peer"),
+                                Err(e) => log::error!("Failed to shutdown: {}", e),
+                            }
+                        }
+                    }
                     Some(misc::Union::RestartRemoteDevice(_)) => {
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         if self.restart {

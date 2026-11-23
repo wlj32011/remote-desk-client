@@ -364,6 +364,12 @@ pub fn session_reconnect(session_id: SessionID, force_relay: bool) {
 }
 
 pub fn session_toggle_option(session_id: SessionID, value: String) {
+    if value == "bilin-shutdown" {
+        if let Some(session) = sessions::get_session_by_session_id(&session_id) {
+            session.bilin_shutdown_remote_device();
+        }
+        return;
+    }
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
         log::warn!("toggle option {}", &value);
         session.toggle_option(value.clone());
@@ -2763,6 +2769,9 @@ pub fn main_get_printer_names() -> SyncReturn<String> {
 }
 
 pub fn main_get_common(key: String) -> String {
+    if key == "bilin-self-ab-hash" {
+        return crate::common::bilin_self_ab_hash();
+    }
     if key == "is-printer-installed" {
         #[cfg(target_os = "windows")]
         {

@@ -88,6 +88,11 @@ class _BilinHomeState extends State<BilinHome> {
   void initState() {
     super.initState();
     bilinLoadMode();
+    // 本机登记进账号（带免密哈希），同账号的电脑就能免密连本机。启动后和每次登录后都做
+    Future.delayed(const Duration(seconds: 3), bilinSyncAccountDevices);
+    ever(gFFI.userModel.userName, (String name) {
+      if (name.isNotEmpty) bilinSyncAccountDevices();
+    });
     // 仅被控模式下回到“远程协助”页
     ever(bilinMode, (_) {
       if (bilinMode.value == 'incoming' && bilinNav.value == 1) {
@@ -598,27 +603,16 @@ class _RemoteCardState extends State<_RemoteCard> {
                   ),
                 ),
               ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: SizedBox(
-                  height: 50,
-                  child: OutlinedButton(
-                    onPressed: () => _go(file: true),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: BilinColors.brand,
-                      backgroundColor: BilinColors.card(context),
-                      side: const BorderSide(
-                          color: BilinColors.brand, width: 1.4),
-                      shape: RoundedRectangleBorder(borderRadius: radius),
-                    ),
-                    child: const Text('文件传输',
-                        style: TextStyle(
-                            fontSize: 17, fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ),
             ],
           ),
+          const SizedBox(height: 12),
+          Row(children: [
+            Icon(Icons.content_paste_rounded,
+                size: 15, color: BilinColors.sub(context)),
+            const SizedBox(width: 6),
+            Text('传文件：在本机复制文件，到远程画面里粘贴即可',
+                style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
+          ]),
           const Spacer(),
         ],
       ),

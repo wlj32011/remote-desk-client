@@ -571,6 +571,15 @@ impl<T: InvokeUiSession> Session<T> {
         self.send(Data::Message(LoginConfigHandler::refresh()));
     }
 
+    /// bilin: 让对方关机（批量关机用）
+    pub fn bilin_shutdown_remote_device(&self) {
+        let mut misc = Misc::new();
+        misc.set_bilin_shutdown_remote_device(true);
+        let mut msg = Message::new();
+        msg.set_misc(misc);
+        self.send(Data::Message(msg));
+    }
+
     pub fn restart_remote_device(&self) {
         let mut lc = self.lc.write().unwrap();
         lc.mark_restarting_remote_device();
