@@ -71,15 +71,8 @@ class DesktopSettingPage extends StatefulWidget {
         !bind.isDisableSettings() &&
         bind.mainGetBuildinOption(key: kOptionHideSecuritySetting) != 'Y')
       SettingsTabKey.safety,
-    if (!bind.isDisableSettings() &&
-        bind.mainGetBuildinOption(key: kOptionHideNetworkSetting) != 'Y')
-      SettingsTabKey.network,
+    // bilin: 网络、账号、打印机三页去掉（服务器内置；登录在主窗口左下角；打印用默认）
     if (!bind.isIncomingOnly()) SettingsTabKey.display,
-    if (!bind.isDisableAccount()) SettingsTabKey.account,
-    if (isWindows &&
-        !bind.isDisableSettings() &&
-        bind.mainGetBuildinOption(key: kOptionHideRemotePrinterSetting) != 'Y')
-      SettingsTabKey.printer,
     SettingsTabKey.about,
   ];
 
@@ -415,15 +408,10 @@ class _GeneralState extends State<_General> {
     return ListView(
       controller: scrollController,
       children: [
+        // bilin: 只留常用的三项，其余（硬件编码、音频、录屏、快捷键、“其他”里的一堆开关）都用默认值
         if (!isWeb) service(),
         theme(),
         _Card(title: 'Language', children: [language()]),
-        if (!isWeb) hwcodec(),
-        if (!isWeb) audio(context),
-        if (!isWeb) record(context),
-        if (!isWeb) WaylandCard(),
-        other(),
-        if (!bind.isIncomingOnly()) keyboardShortcuts(),
       ],
     ).marginOnly(bottom: _kListViewBottomMargin);
   }
@@ -1037,12 +1025,8 @@ class _SafetyState extends State<_Safety> with AutomaticKeepAliveClientMixin {
             preventMouseKeyBuilder(
               block: locked,
               child: Column(children: [
-                permissions(context),
+                // bilin: 只留“密码”（临时密码 / 固定密码），权限、二次验证、改 ID、高级选项都用默认
                 password(context),
-                _Card(title: '2FA', children: [tfa()]),
-                if (!isChangeIdDisabled())
-                  _Card(title: 'ID', children: [changeId()]),
-                more(context),
               ]),
             ),
           ],
@@ -2009,13 +1993,8 @@ class _DisplayState extends State<_Display> {
   Widget build(BuildContext context) {
     final scrollController = ScrollController();
     return ListView(controller: scrollController, children: [
-      viewStyle(context),
-      scrollStyle(context),
+      // bilin: 只留“默认画质”
       imageQuality(context),
-      codec(context),
-      if (isDesktop) trackpadSpeed(context),
-      if (!isWeb) privacyModeImpl(context),
-      other(context),
     ]).marginOnly(bottom: _kListViewBottomMargin);
   }
 

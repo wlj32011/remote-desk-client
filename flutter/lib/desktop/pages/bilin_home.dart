@@ -2,9 +2,11 @@
 // 左侧导航：品牌名、远程协助、设备列表，底部设置；
 // 「远程协助」：左卡片“允许控制本机”（识别码 + 临时密码），右卡片“控制远程设备”（输入识别码 + 两个按钮），
 // 下面一排“最近连接”设备卡片；底部状态栏。只用公开 API（gFFI / bind / connect），不改 RustDesk 的连接逻辑。
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_hbb/common.dart';
+import 'package:flutter_hbb/common.dart' hide Dialog;
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/widgets/peer_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart'
@@ -14,6 +16,8 @@ import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
+import 'package:flutter_hbb/common/hbbs/hbbs.dart';
+import 'package:http/http.dart' as http;
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 
@@ -80,6 +84,16 @@ class _BilinHomeState extends State<BilinHome> {
   final RxInt _nav = 0.obs;
 
   @override
+  void initState() {
+    super.initState();
+    bilinLoadMode();
+    // 仅被控模式下回到“远程协助”页
+    ever(bilinMode, (_) {
+      if (bilinMode.value == 'incoming') _nav.value = 0;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Container(
       color: BilinColors.page(context),
@@ -141,8 +155,12 @@ class _BilinHomeState extends State<BilinHome> {
           ).paddingOnly(left: 6, bottom: 22),
           _navItem(context, 0, Icons.desktop_windows_outlined, '远程协助'),
           const SizedBox(height: 6),
-          _navItem(context, 1, Icons.devices_outlined, '设备列表'),
+          Obx(() => bilinMode.value == 'incoming'
+              ? const SizedBox()
+              : _navItem(context, 1, Icons.devices_outlined, '设备列表')),
           const Spacer(),
+          const _AccountButton(),
+          const SizedBox(height: 4),
           _sideButton(context, Icons.settings_outlined, '设置', () {
             if (DesktopSettingPage.tabKeys.isNotEmpty) {
               DesktopSettingPage.switch2page(DesktopSettingPage.tabKeys[0]);
@@ -238,18 +256,40 @@ class _AssistPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (notice != null) notice!,
-          IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: const [
-                Expanded(child: _LocalCard()),
-                SizedBox(width: 18),
-                Expanded(child: _RemoteCard()),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          _RecentRow(onShowAll: onShowAll),
+          Obx(() => bilinMode.value == 'incoming'
+              ? Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const _LocalCard(),
+                        const SizedBox(height: 14),
+                        Text('当前为“仅被控”模式：本机只允许被远程控制。可在左下角账号菜单里切换。',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                fontSize: 13, color: BilinColors.sub(context))),
+                      ],
+                    ),
+                  ),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    IntrinsicHeight(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: const [
+                          Expanded(child: _LocalCard()),
+                          SizedBox(width: 18),
+                          Expanded(child: _RemoteCard()),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    _RecentRow(onShowAll: onShowAll),
+                  ],
+                )),
         ],
       ),
     );
@@ -732,26 +772,478 @@ class _PeerCard extends StatelessWidget {
   }
 }
 
-/// 「设备列表」页：最近连接、收藏、地址簿（沿用 RustDesk 的列表组件）
-class _DevicesPage extends StatelessWidget {
+/// 「设备列表」页：同一账号登录过的电脑（来自账号后台 /api/peers）
+class _DevicesPage extends StatefulWidget {
   const _DevicesPage();
+
+  @override
+  State<_DevicesPage> createState() => _DevicesPageState();
+}
+
+class _DevicesPageState extends State<_DevicesPage> {
+  @override
+  void initState() {
+    super.initState();
+    if (gFFI.userModel.isLogin) {
+      gFFI.groupModel.pull(force: true, quiet: true);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          bilinTitle(context, '设备列表'),
-          const SizedBox(height: 14),
-          const Expanded(
-            child: _Card(
-              padding: EdgeInsets.fromLTRB(14, 8, 4, 4),
-              child: PeerTabPage(),
+      child: Obx(() {
+        final loggedIn = gFFI.userModel.userName.value.isNotEmpty;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                bilinTitle(context, '我的设备'),
+                const Spacer(),
+                if (loggedIn)
+                  TextButton.icon(
+                    onPressed: () =>
+                        gFFI.groupModel.pull(force: true, quiet: false),
+                    icon: const Icon(Icons.refresh_rounded, size: 18),
+                    label: const Text('刷新'),
+                    style: TextButton.styleFrom(
+                        foregroundColor: BilinColors.brand),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: loggedIn
+                  ? _myDevices(context)
+                  : _Card(
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.devices_outlined,
+                                size: 56, color: BilinColors.sub(context)),
+                            const SizedBox(height: 14),
+                            Text('登录账号后，用同一账号登录的电脑会自动出现在这里，点一下就能连接',
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    color: BilinColors.sub(context))),
+                            const SizedBox(height: 18),
+                            SizedBox(
+                              width: 160,
+                              height: 44,
+                              child: ElevatedButton(
+                                onPressed: () => showBilinLoginDialog(context),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: BilinColors.brand,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: const Text('登录 / 注册',
+                                    style: TextStyle(fontSize: 15)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+            ),
+          ],
+        );
+      }),
+    );
+  }
+
+  Widget _myDevices(BuildContext context) {
+    return ChangeNotifierProvider.value(
+      value: gFFI.groupModel.peersModel,
+      child: Consumer<Peers>(builder: (context, model, _) {
+        final myId = gFFI.serverModel.serverId.text.replaceAll(' ', '');
+        final peers = model.peers.where((p) => p.id != myId).toList();
+        if (peers.isNotEmpty && model.event == UpdateEvent.load) {
+          bind.queryOnlines(ids: peers.map((p) => p.id).toList());
+        }
+        if (peers.isEmpty) {
+          return _Card(
+            child: Center(
+              child: Text('这个账号下还没有其他电脑。在别的电脑上安装比邻远程并登录同一账号即可',
+                  style:
+                      TextStyle(fontSize: 14, color: BilinColors.sub(context))),
+            ),
+          );
+        }
+        return LayoutBuilder(builder: (context, c) {
+          final cols = (c.maxWidth / 300).floor().clamp(1, 4);
+          return GridView.count(
+            crossAxisCount: cols,
+            mainAxisSpacing: 14,
+            crossAxisSpacing: 14,
+            childAspectRatio: 2.4,
+            children: [for (final p in peers) _PeerCard(peer: p)],
+          );
+        });
+      }),
+    );
+  }
+}
+
+// ===== 账号：登录 / 注册 / 模式 =====
+
+/// 'both' = 主控 + 被控；'incoming' = 仅被控
+final RxString bilinMode = 'both'.obs;
+const _kBilinModeKey = 'bilin-mode';
+
+void bilinLoadMode() {
+  final v = bind.mainGetLocalOption(key: _kBilinModeKey);
+  bilinMode.value = v == 'incoming' ? 'incoming' : 'both';
+}
+
+Future<void> bilinSetMode(String mode) async {
+  bilinMode.value = mode;
+  await bind.mainSetLocalOption(key: _kBilinModeKey, value: mode);
+}
+
+String bilinModeLabel(String mode) => mode == 'incoming' ? '仅被控' : '主控 + 被控';
+
+/// 侧栏底部的账号入口
+class _AccountButton extends StatelessWidget {
+  const _AccountButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Obx(() {
+      final name = gFFI.userModel.userName.value;
+      if (name.isEmpty) {
+        return Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => showBilinLoginDialog(context),
+            child: SizedBox(
+              height: 46,
+              child: Row(children: [
+                const SizedBox(width: 14),
+                Icon(Icons.account_circle_outlined,
+                    size: 21, color: BilinColors.text(context)),
+                const SizedBox(width: 12),
+                Text('登录 / 注册',
+                    style: TextStyle(
+                        fontSize: 15, color: BilinColors.text(context))),
+              ]),
             ),
           ),
+        );
+      }
+      return PopupMenuButton<String>(
+        tooltip: '账号',
+        offset: const Offset(0, -110),
+        onSelected: (v) async {
+          if (v == 'mode') {
+            await bilinSetMode(
+                bilinMode.value == 'incoming' ? 'both' : 'incoming');
+            showToast('已切换为“${bilinModeLabel(bilinMode.value)}”');
+          } else if (v == 'logout') {
+            await gFFI.userModel.logOut();
+          }
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem(
+              value: 'mode',
+              child: Text(bilinMode.value == 'incoming'
+                  ? '切换为“主控 + 被控”'
+                  : '切换为“仅被控”')),
+          const PopupMenuItem(value: 'logout', child: Text('退出登录')),
         ],
+        child: Container(
+          height: 54,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          child: Row(children: [
+            CircleAvatar(
+              radius: 15,
+              backgroundColor: BilinColors.brand,
+              child: Text(name.characters.first.toUpperCase(),
+                  style: const TextStyle(color: Colors.white, fontSize: 14)),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: BilinColors.text(context))),
+                  Text(bilinModeLabel(bilinMode.value),
+                      style: TextStyle(
+                          fontSize: 12, color: BilinColors.sub(context))),
+                ],
+              ),
+            ),
+          ]),
+        ),
+      );
+    });
+  }
+}
+
+Future<void> showBilinLoginDialog(BuildContext context) async {
+  await showDialog(
+    context: context,
+    barrierDismissible: true,
+    builder: (_) => const _LoginDialog(),
+  );
+}
+
+class _LoginDialog extends StatefulWidget {
+  const _LoginDialog();
+
+  @override
+  State<_LoginDialog> createState() => _LoginDialogState();
+}
+
+class _LoginDialogState extends State<_LoginDialog> {
+  bool _register = false;
+  bool _busy = false;
+  String _error = '';
+  String _mode = bilinMode.value;
+  final _user = TextEditingController();
+  final _pwd = TextEditingController();
+  final _pwd2 = TextEditingController();
+
+  @override
+  void dispose() {
+    _user.dispose();
+    _pwd.dispose();
+    _pwd2.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final user = _user.text.trim();
+    final pwd = _pwd.text;
+    if (user.isEmpty || pwd.isEmpty) {
+      setState(() => _error = '请输入账号和密码');
+      return;
+    }
+    if (_register) {
+      if (pwd.length < 6) {
+        setState(() => _error = '密码至少 6 位');
+        return;
+      }
+      if (pwd != _pwd2.text) {
+        setState(() => _error = '两次输入的密码不一样');
+        return;
+      }
+    }
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+    try {
+      if (_register) {
+        final api = await bind.mainGetApiServer();
+        final resp = await http.post(
+          Uri.parse('$api/api/admin/user/register'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'username': user,
+            'password': pwd,
+            'confirm_password': pwd,
+          }),
+        );
+        final body = jsonDecode(decode_http_response(resp));
+        if (body is! Map || body['code'] != 0) {
+          final msg = body is Map ? (body['message'] ?? '') : '';
+          throw Exception(msg == '操作失败。' ? '这个账号已被注册，换一个试试' : '注册失败：$msg');
+        }
+      }
+      final resp = await gFFI.userModel.login(LoginRequest(
+          username: user,
+          password: pwd,
+          id: await bind.mainGetMyId(),
+          uuid: await bind.mainGetUuid(),
+          autoLogin: true,
+          type: HttpType.kAuthReqTypeAccount));
+      if (resp.type == HttpType.kAuthResTypeToken &&
+          resp.access_token != null) {
+        await bind.mainSetLocalOption(
+            key: 'access_token', value: resp.access_token!);
+        await bind.mainSetLocalOption(
+            key: 'user_info', value: jsonEncode(resp.user ?? {}));
+        await bilinSetMode(_mode);
+        gFFI.groupModel.pull(force: true, quiet: true);
+        if (mounted) Navigator.of(context).pop();
+        showToast(_register ? '注册成功，已登录' : '登录成功');
+        return;
+      }
+      setState(() => _error = '登录失败，请稍后再试');
+    } on RequestException catch (e) {
+      setState(() => _error = e.cause.contains('密码') || e.cause.isEmpty
+          ? '账号或密码不对'
+          : e.cause);
+    } catch (e) {
+      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  InputDecoration _deco(String hint, IconData icon) => InputDecoration(
+        hintText: hint,
+        prefixIcon: Icon(icon, size: 20),
+        filled: true,
+        fillColor: BilinColors.field(context),
+        contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none),
+      );
+
+  Widget _modeOption(String value, String title, String desc) {
+    final selected = _mode == value;
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => setState(() => _mode = value),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+                color: selected ? BilinColors.brand : BilinColors.border(context),
+                width: selected ? 1.6 : 1),
+            color: selected ? BilinColors.brand.withOpacity(0.06) : null,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                    size: 18,
+                    color: selected ? BilinColors.brand : BilinColors.sub(context)),
+                const SizedBox(width: 6),
+                Text(title,
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: BilinColors.text(context))),
+              ]),
+              const SizedBox(height: 4),
+              Text(desc,
+                  style: TextStyle(fontSize: 12, color: BilinColors.sub(context))),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: BilinColors.card(context),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      child: SizedBox(
+        width: 420,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 24, 28, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.asset('assets/icon.png', width: 30, height: 30),
+                ),
+                const SizedBox(width: 10),
+                Text(_register ? '注册比邻远程账号' : '登录比邻远程',
+                    style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                        color: BilinColors.text(context))),
+              ]),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _user,
+                autofocus: true,
+                decoration: _deco('账号（手机号或用户名）', Icons.person_outline),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _pwd,
+                obscureText: true,
+                onSubmitted: (_) => _register ? null : _submit(),
+                decoration: _deco('密码', Icons.lock_outline),
+              ),
+              if (_register) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _pwd2,
+                  obscureText: true,
+                  onSubmitted: (_) => _submit(),
+                  decoration: _deco('再输一次密码', Icons.lock_outline),
+                ),
+              ],
+              const SizedBox(height: 18),
+              Text('这台电脑的使用方式',
+                  style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
+              const SizedBox(height: 8),
+              Row(children: [
+                _modeOption('both', '主控 + 被控', '能控制别人，也能被控制'),
+                const SizedBox(width: 10),
+                _modeOption('incoming', '仅被控', '只让别人控制这台电脑'),
+              ]),
+              if (_error.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(_error,
+                    style: const TextStyle(color: Color(0xFFE53935), fontSize: 13)),
+              ],
+              const SizedBox(height: 18),
+              SizedBox(
+                height: 46,
+                child: ElevatedButton(
+                  onPressed: _busy ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: BilinColors.brand,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: _busy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : Text(_register ? '注册并登录' : '登录',
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => setState(() {
+                          _register = !_register;
+                          _error = '';
+                        }),
+                child: Text(_register ? '已有账号？去登录' : '没有账号？免费注册',
+                    style: const TextStyle(color: BilinColors.brand)),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
