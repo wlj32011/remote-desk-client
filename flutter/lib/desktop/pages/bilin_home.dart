@@ -1,45 +1,70 @@
-// 比邻远程：桌面版主页（参考向日葵 / 连连控 / UU 远程的布局重做）
-// 左侧窄导航：远程协助、设备列表、设置；
-// 「远程协助」页：左卡片“允许控制本机”（识别码 + 临时密码），右卡片“控制远程设备”（输入识别码 + 两个大按钮）；
-// 底部是服务状态。只用公开 API（gFFI / bind / connect），不改 RustDesk 的连接逻辑。
+// 比邻远程：桌面版主页（11-23 用户选定 Codex 设计稿“方案 A 明亮简约”）
+// 左侧导航：品牌名、远程协助、设备列表，底部设置；
+// 「远程协助」：左卡片“允许控制本机”（识别码 + 临时密码），右卡片“控制远程设备”（输入识别码 + 两个按钮），
+// 下面一排“最近连接”设备卡片；底部状态栏。只用公开 API（gFFI / bind / connect），不改 RustDesk 的连接逻辑。
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
 import 'package:flutter_hbb/common/widgets/peer_tab_page.dart';
-import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart'
     show OnlineStatusWidget;
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 
 class BilinColors {
-  static const brand = Color(0xFF2B6CFF);
-  static const brand2 = Color(0xFF17C3B2);
-  static const gradient = LinearGradient(
-    colors: [brand, Color(0xFF1E9BE0)],
-    begin: Alignment.centerLeft,
-    end: Alignment.centerRight,
-  );
-  static bool isDark(BuildContext c) => Theme.of(c).brightness == Brightness.dark;
+  static const brand = Color(0xFF1E66FF);
+  static const teal = Color(0xFF1ED6B5);
+  static const online = Color(0xFF22C55E);
+  static bool isDark(BuildContext c) =>
+      Theme.of(c).brightness == Brightness.dark;
   static Color page(BuildContext c) =>
-      isDark(c) ? const Color(0xFF1B1D22) : const Color(0xFFF3F5F9);
+      isDark(c) ? const Color(0xFF1B1D22) : const Color(0xFFF5F7FB);
   static Color sidebar(BuildContext c) =>
-      isDark(c) ? const Color(0xFF15171B) : Colors.white;
+      isDark(c) ? const Color(0xFF16181C) : const Color(0xFFF0F3F9);
   static Color card(BuildContext c) =>
       isDark(c) ? const Color(0xFF24272E) : Colors.white;
   static Color field(BuildContext c) =>
-      isDark(c) ? const Color(0xFF2E323A) : const Color(0xFFF4F6FA);
+      isDark(c) ? const Color(0xFF2A3346) : const Color(0xFFEDF3FE);
   static Color border(BuildContext c) =>
-      isDark(c) ? const Color(0xFF33373F) : const Color(0xFFE6E9F0);
+      isDark(c) ? const Color(0xFF33373F) : const Color(0xFFE3E8F0);
+  static Color inputBorder(BuildContext c) =>
+      isDark(c) ? const Color(0xFF3B4150) : const Color(0xFFCFD6E2);
   static Color text(BuildContext c) =>
-      isDark(c) ? const Color(0xFFF2F3F5) : const Color(0xFF1F2937);
+      isDark(c) ? const Color(0xFFF2F3F5) : const Color(0xFF111827);
   static Color sub(BuildContext c) =>
       isDark(c) ? const Color(0xFF9AA0AA) : const Color(0xFF6B7280);
+}
+
+/// 标题前的品牌色小竖条
+Widget bilinTitle(BuildContext context, String text, {double size = 20}) {
+  return Row(
+    children: [
+      Container(
+        width: 4,
+        height: size * 1.05,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(2),
+          gradient: const LinearGradient(
+            colors: [BilinColors.brand, BilinColors.teal],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+      ),
+      const SizedBox(width: 10),
+      Text(text,
+          style: TextStyle(
+              fontSize: size,
+              fontWeight: FontWeight.w700,
+              color: BilinColors.text(context))),
+    ],
+  );
 }
 
 /// 主页整体：左导航 + 内容区。[notice] 是 RustDesk 原有的安装/权限/更新提示卡片，原样放在内容区顶部。
@@ -65,9 +90,23 @@ class _BilinHomeState extends State<BilinHome> {
           Expanded(
             child: Column(
               children: [
-                Expanded(child: _AssistPage(notice: widget.notice)),
+                Expanded(
+                  child: Obx(() => IndexedStack(
+                        index: _nav.value,
+                        children: [
+                          _AssistPage(
+                              notice: widget.notice,
+                              onShowAll: () => _nav.value = 1),
+                          const _DevicesPage(),
+                        ],
+                      )),
+                ),
                 Container(
-                  color: BilinColors.card(context),
+                  decoration: BoxDecoration(
+                    color: BilinColors.card(context),
+                    border: Border(
+                        top: BorderSide(color: BilinColors.border(context))),
+                  ),
                   child: OnlineStatusWidget(),
                 ),
               ],
@@ -80,20 +119,29 @@ class _BilinHomeState extends State<BilinHome> {
 
   Widget _buildSidebar(BuildContext context) {
     return Container(
-      width: 84,
-      decoration: BoxDecoration(
-        color: BilinColors.sidebar(context),
-        border: Border(right: BorderSide(color: BilinColors.border(context))),
-      ),
+      width: 188,
+      color: BilinColors.sidebar(context),
+      padding: const EdgeInsets.fromLTRB(12, 16, 12, 14),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 18),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Image.asset('assets/icon.png', width: 40, height: 40),
-          ),
-          const SizedBox(height: 22),
-          _navItem(context, 0, Icons.screen_share_outlined, '远程协助'),
+          Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset('assets/icon.png', width: 30, height: 30),
+              ),
+              const SizedBox(width: 10),
+              Text('比邻远程',
+                  style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: BilinColors.text(context))),
+            ],
+          ).paddingOnly(left: 6, bottom: 22),
+          _navItem(context, 0, Icons.desktop_windows_outlined, '远程协助'),
+          const SizedBox(height: 6),
+          _navItem(context, 1, Icons.devices_outlined, '设备列表'),
           const Spacer(),
           _sideButton(context, Icons.settings_outlined, '设置', () {
             if (DesktopSettingPage.tabKeys.isNotEmpty) {
@@ -102,49 +150,43 @@ class _BilinHomeState extends State<BilinHome> {
               DesktopTabPage.onAddSetting();
             }
           }),
-          const SizedBox(height: 14),
         ],
       ),
     );
   }
 
   Widget _navItem(BuildContext context, int index, IconData icon, String label) {
-    return Obx(() {
-      final selected = _nav.value == index;
-      return _sideButton(context, icon, label, () => _nav.value = index,
-          selected: selected);
-    });
+    return Obx(() => _sideButton(context, icon, label, () => _nav.value = index,
+        selected: _nav.value == index));
   }
 
   Widget _sideButton(
       BuildContext context, IconData icon, String label, VoidCallback onTap,
       {bool selected = false}) {
-    final color = selected ? BilinColors.brand : BilinColors.sub(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      child: Material(
-        color: selected
-            ? BilinColors.brand.withOpacity(0.10)
-            : Colors.transparent,
+    final color = selected ? BilinColors.brand : BilinColors.text(context);
+    return Material(
+      color: selected
+          ? BilinColors.brand
+              .withOpacity(BilinColors.isDark(context) ? 0.22 : 0.10)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: SizedBox(
-            height: 62,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: color, size: 24),
-                const SizedBox(height: 5),
-                Text(label,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: color,
-                        fontWeight:
-                            selected ? FontWeight.w600 : FontWeight.normal)),
-              ],
-            ),
+        onTap: onTap,
+        child: SizedBox(
+          height: 46,
+          child: Row(
+            children: [
+              const SizedBox(width: 14),
+              Icon(icon, color: color, size: 21),
+              const SizedBox(width: 12),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 15,
+                      color: color,
+                      fontWeight:
+                          selected ? FontWeight.w600 : FontWeight.normal)),
+            ],
           ),
         ),
       ),
@@ -152,59 +194,46 @@ class _BilinHomeState extends State<BilinHome> {
   }
 }
 
-/// 卡片外壳
+/// 白色圆角卡片
 class _Card extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final List<Widget> children;
+  final Widget child;
+  final EdgeInsets padding;
   const _Card(
-      {required this.title, required this.subtitle, required this.children});
+      {required this.child,
+      this.padding = const EdgeInsets.fromLTRB(24, 22, 24, 24)});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 22),
+      padding: padding,
       decoration: BoxDecoration(
         color: BilinColors.card(context),
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: BilinColors.border(context)),
         boxShadow: BilinColors.isDark(context)
             ? null
             : [
                 BoxShadow(
-                    color: const Color(0xFF1F2937).withOpacity(0.05),
-                    blurRadius: 18,
-                    offset: const Offset(0, 6)),
+                    color: const Color(0xFF1F2937).withOpacity(0.04),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4)),
               ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title,
-              style: TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w700,
-                  color: BilinColors.text(context))),
-          const SizedBox(height: 6),
-          Text(subtitle,
-              style: TextStyle(fontSize: 12.5, color: BilinColors.sub(context))),
-          const SizedBox(height: 20),
-          ...children,
-        ],
-      ),
+      child: child,
     );
   }
 }
 
-/// 「远程协助」页：上面两张卡片，下面是最近连接 / 收藏 / 地址簿
+/// 「远程协助」页
 class _AssistPage extends StatelessWidget {
   final Widget? notice;
-  const _AssistPage({this.notice});
+  final VoidCallback onShowAll;
+  const _AssistPage({this.notice, required this.onShowAll});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 14),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -219,8 +248,8 @@ class _AssistPage extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          const Expanded(child: _DevicesPanel()),
+          const SizedBox(height: 24),
+          _RecentRow(onShowAll: onShowAll),
         ],
       ),
     );
@@ -239,35 +268,39 @@ class _LocalCard extends StatelessWidget {
         final showOneTime = model.approveMode != 'click' &&
             model.verificationMethod != kUsePermanentPassword;
         return _Card(
-          title: '允许控制本机',
-          subtitle: '把下面的识别码和密码告诉你信任的人，对方就能远程协助你',
-          children: [
-            _InfoField(
-              label: '本机识别码',
-              listenable: model.serverId,
-              value: () => _groupId(model.serverId.text),
-              copyText: () => model.serverId.text,
-              big: true,
-            ),
-            const SizedBox(height: 14),
-            _PasswordField(model: model, showOneTime: showOneTime),
-          ],
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              bilinTitle(context, '允许控制本机'),
+              const SizedBox(height: 18),
+              _InfoField(
+                label: '本机识别码',
+                listenable: model.serverId,
+                value: () => groupId(model.serverId.text),
+                copyText: () => model.serverId.text,
+                big: true,
+              ),
+              const SizedBox(height: 12),
+              _PasswordField(model: model, showOneTime: showOneTime),
+            ],
+          ),
         );
       }),
     );
   }
+}
 
-  static String _groupId(String id) {
-    final s = id.replaceAll(' ', '');
-    if (s.isEmpty) return '…';
-    if (int.tryParse(s) == null) return s;
-    final buf = StringBuffer();
-    for (var i = 0; i < s.length; i++) {
-      if (i > 0 && (s.length - i) % 3 == 0) buf.write(' ');
-      buf.write(s[i]);
-    }
-    return buf.toString();
+/// 识别码三位一组：218181697 -> 218 181 697
+String groupId(String id) {
+  final s = id.replaceAll(' ', '');
+  if (s.isEmpty) return '…';
+  if (int.tryParse(s) == null) return s;
+  final buf = StringBuffer();
+  for (var i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 == 0) buf.write(' ');
+    buf.write(s[i]);
   }
+  return buf.toString();
 }
 
 class _IconBtn extends StatelessWidget {
@@ -284,12 +317,23 @@ class _IconBtn extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(icon, size: 19, color: BilinColors.sub(context)),
+          padding: const EdgeInsets.all(7),
+          child: Icon(icon, size: 21, color: BilinColors.sub(context)),
         ),
       ),
     );
   }
+}
+
+Widget _fieldBox(BuildContext context, {required Widget child}) {
+  return Container(
+    padding: const EdgeInsets.fromLTRB(18, 12, 10, 12),
+    decoration: BoxDecoration(
+      color: BilinColors.field(context),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: child,
+  );
 }
 
 class _InfoField extends StatelessWidget {
@@ -307,18 +351,14 @@ class _InfoField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-      decoration: BoxDecoration(
-        color: BilinColors.field(context),
-        borderRadius: BorderRadius.circular(12),
-      ),
+    return _fieldBox(
+      context,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
-              style: TextStyle(fontSize: 12.5, color: BilinColors.sub(context))),
-          const SizedBox(height: 4),
+              style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
+          const SizedBox(height: 2),
           Row(
             children: [
               Expanded(
@@ -328,9 +368,9 @@ class _InfoField extends StatelessWidget {
                     value(),
                     maxLines: 1,
                     style: TextStyle(
-                      fontSize: big ? 30 : 22,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
+                      fontSize: big ? 32 : 24,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
                       color: BilinColors.text(context),
                     ),
                   ),
@@ -363,18 +403,14 @@ class _PasswordFieldState extends State<_PasswordField> {
   @override
   Widget build(BuildContext context) {
     final model = widget.model;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-      decoration: BoxDecoration(
-        color: BilinColors.field(context),
-        borderRadius: BorderRadius.circular(12),
-      ),
+    return _fieldBox(
+      context,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(widget.showOneTime ? '临时密码' : '访问密码',
-              style: TextStyle(fontSize: 12.5, color: BilinColors.sub(context))),
-          const SizedBox(height: 4),
+              style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
+          const SizedBox(height: 2),
           Row(
             children: [
               Expanded(
@@ -389,11 +425,11 @@ class _PasswordFieldState extends State<_PasswordField> {
                       shown.isEmpty ? '-' : shown,
                       maxLines: 1,
                       style: TextStyle(
-                        fontSize: widget.showOneTime ? 22 : 15,
+                        fontSize: widget.showOneTime ? 28 : 15,
                         fontWeight: widget.showOneTime
-                            ? FontWeight.w700
+                            ? FontWeight.w800
                             : FontWeight.normal,
-                        letterSpacing: widget.showOneTime ? 1.5 : 0,
+                        letterSpacing: widget.showOneTime ? 1.2 : 0,
                         color: BilinColors.text(context),
                       ),
                     );
@@ -407,7 +443,7 @@ class _PasswordFieldState extends State<_PasswordField> {
                         : Icons.visibility_off_outlined,
                     _visible ? '隐藏' : '显示',
                     () => setState(() => _visible = !_visible)),
-                _IconBtn(Icons.refresh_rounded, '换一个密码',
+                _IconBtn(Icons.sync_rounded, '换一个密码',
                     () => bind.mainUpdateTemporaryPassword()),
                 _IconBtn(Icons.copy_rounded, '复制', () {
                   Clipboard.setData(
@@ -415,8 +451,8 @@ class _PasswordFieldState extends State<_PasswordField> {
                   showToast(translate('Copied'));
                 }),
               ],
-              if (!bind.isDisableSettings())
-                _IconBtn(Icons.edit_outlined, '设置固定密码',
+              if (!widget.showOneTime && !bind.isDisableSettings())
+                _IconBtn(Icons.edit_outlined, '修改密码',
                     () => DesktopSettingPage.switch2page(SettingsTabKey.safety)),
             ],
           ),
@@ -458,112 +494,265 @@ class _RemoteCardState extends State<_RemoteCard> {
 
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(12);
     return _Card(
-      title: '控制远程设备',
-      subtitle: '输入对方的识别码，连接后按提示输入对方的密码',
-      children: [
-        TextField(
-          controller: _idCtrl,
-          focusNode: _focus,
-          autocorrect: false,
-          enableSuggestions: false,
-          inputFormatters: [IDTextInputFormatter()],
-          onSubmitted: (_) => _go(),
-          style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 1.2,
-              color: BilinColors.text(context)),
-          decoration: InputDecoration(
-            hintText: '输入对方识别码',
-            hintStyle: TextStyle(
-                fontSize: 17,
-                letterSpacing: 0,
-                fontWeight: FontWeight.normal,
-                color: BilinColors.sub(context)),
-            filled: true,
-            fillColor: BilinColors.field(context),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none),
-            enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none),
-            focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide:
-                    const BorderSide(color: BilinColors.brand, width: 1.5)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          bilinTitle(context, '控制远程设备'),
+          const Spacer(),
+          TextField(
+            controller: _idCtrl,
+            focusNode: _focus,
+            autocorrect: false,
+            enableSuggestions: false,
+            inputFormatters: [IDTextInputFormatter()],
+            onSubmitted: (_) => _go(),
+            style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 1.0,
+                color: BilinColors.text(context)),
+            decoration: InputDecoration(
+              hintText: '输入对方识别码',
+              hintStyle: TextStyle(
+                  fontSize: 17,
+                  letterSpacing: 0,
+                  fontWeight: FontWeight.normal,
+                  color: BilinColors.sub(context)),
+              filled: true,
+              fillColor: BilinColors.card(context),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 18, vertical: 17),
+              border: OutlineInputBorder(
+                  borderRadius: radius,
+                  borderSide:
+                      BorderSide(color: BilinColors.inputBorder(context))),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: radius,
+                  borderSide: BorderSide(
+                      color: BilinColors.inputBorder(context), width: 1.2)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: radius,
+                  borderSide:
+                      const BorderSide(color: BilinColors.brand, width: 1.6)),
+            ),
           ),
-        ),
-        const SizedBox(height: 18),
-        Row(
-          children: [
-            Expanded(
-              child: SizedBox(
-                height: 48,
-                child: OutlinedButton.icon(
-                  onPressed: () => _go(file: true),
-                  icon: const Icon(Icons.folder_copy_outlined, size: 19),
-                  label: const Text('文件传输', style: TextStyle(fontSize: 15)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: BilinColors.brand,
-                    side: BorderSide(
-                        color: BilinColors.brand.withOpacity(0.55), width: 1.2),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: SizedBox(
-                height: 48,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: BilinColors.gradient,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: ElevatedButton.icon(
+          const SizedBox(height: 22),
+          Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 50,
+                  child: ElevatedButton(
                     onPressed: () => _go(),
-                    icon: const Icon(Icons.desktop_windows_outlined, size: 19),
-                    label: const Text('远程控制',
-                        style: TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w600)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
+                      backgroundColor: BilinColors.brand,
                       foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: radius),
                     ),
+                    child: const Text('远程控制',
+                        style: TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.w600)),
                   ),
                 ),
               ),
-            ),
-          ],
-        ),
-      ],
+              const SizedBox(width: 14),
+              Expanded(
+                child: SizedBox(
+                  height: 50,
+                  child: OutlinedButton(
+                    onPressed: () => _go(file: true),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: BilinColors.brand,
+                      backgroundColor: BilinColors.card(context),
+                      side: const BorderSide(
+                          color: BilinColors.brand, width: 1.4),
+                      shape: RoundedRectangleBorder(borderRadius: radius),
+                    ),
+                    child: const Text('文件传输',
+                        style: TextStyle(
+                            fontSize: 17, fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+        ],
+      ),
     );
   }
 }
 
-/// 最近连接 / 收藏 / 地址簿（沿用 RustDesk 的列表组件）
-class _DevicesPanel extends StatelessWidget {
-  const _DevicesPanel();
+/// 最近连接：一排设备卡片（最多 4 台），点卡片直接连
+class _RecentRow extends StatefulWidget {
+  final VoidCallback onShowAll;
+  const _RecentRow({required this.onShowAll});
+
+  @override
+  State<_RecentRow> createState() => _RecentRowState();
+}
+
+class _RecentRowState extends State<_RecentRow> {
+  @override
+  void initState() {
+    super.initState();
+    bind.mainLoadRecentPeers();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 8, 4, 4),
-      decoration: BoxDecoration(
-        color: BilinColors.card(context),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: BilinColors.border(context)),
+    return ChangeNotifierProvider.value(
+      value: gFFI.recentPeersModel,
+      child: Consumer<Peers>(builder: (context, model, _) {
+        final peers = model.peers.take(4).toList();
+        if (peers.isNotEmpty && model.event == UpdateEvent.load) {
+          bind.queryOnlines(ids: peers.map((p) => p.id).toList());
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                bilinTitle(context, '最近连接', size: 19),
+                const Spacer(),
+                TextButton(
+                  onPressed: widget.onShowAll,
+                  child: const Text('查看全部',
+                      style: TextStyle(color: BilinColors.brand)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (peers.isEmpty)
+              _Card(
+                padding: const EdgeInsets.symmetric(vertical: 34),
+                child: Center(
+                  child: Text('还没有连接过的设备，输入对方识别码开始第一次远程吧',
+                      style: TextStyle(
+                          fontSize: 14, color: BilinColors.sub(context))),
+                ),
+              )
+            else
+              Row(
+                children: [
+                  for (var i = 0; i < 4; i++) ...[
+                    if (i > 0) const SizedBox(width: 14),
+                    Expanded(
+                        child: i < peers.length
+                            ? _PeerCard(peer: peers[i])
+                            : const SizedBox()),
+                  ],
+                ],
+              ),
+          ],
+        );
+      }),
+    );
+  }
+}
+
+class _PeerCard extends StatelessWidget {
+  final Peer peer;
+  const _PeerCard({required this.peer});
+
+  String get _name {
+    if (peer.alias.isNotEmpty) return peer.alias;
+    if (peer.hostname.isNotEmpty) return peer.hostname;
+    return groupId(peer.id);
+  }
+
+  IconData get _icon {
+    final p = peer.platform.toLowerCase();
+    if (p.contains('android') || p.contains('ios')) {
+      return Icons.smartphone_outlined;
+    }
+    if (p.contains('mac')) return Icons.laptop_mac_outlined;
+    return Icons.desktop_windows_outlined;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => connect(context, peer.id),
+        child: _Card(
+          padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
+          child: Row(
+            children: [
+              Icon(_icon, size: 44, color: BilinColors.sub(context)),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: BilinColors.text(context))),
+                    const SizedBox(height: 4),
+                    Text(groupId(peer.id),
+                        style: TextStyle(
+                            fontSize: 14, color: BilinColors.sub(context))),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Container(
+                          width: 9,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: peer.online
+                                ? BilinColors.online
+                                : const Color(0xFFB8BEC8),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(peer.online ? '在线' : '离线',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: BilinColors.sub(context))),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-      child: const PeerTabPage(),
+    );
+  }
+}
+
+/// 「设备列表」页：最近连接、收藏、地址簿（沿用 RustDesk 的列表组件）
+class _DevicesPage extends StatelessWidget {
+  const _DevicesPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          bilinTitle(context, '设备列表'),
+          const SizedBox(height: 14),
+          const Expanded(
+            child: _Card(
+              padding: EdgeInsets.fromLTRB(14, 8, 4, 4),
+              child: PeerTabPage(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
