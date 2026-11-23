@@ -271,7 +271,11 @@ pub fn translate_locale(name: String, locale: &str) -> String {
                 && !name.starts_with("upgrade_rustdesk_server_pro")
                 && name != "powered_by_me"
             {
-                let app_name = crate::get_app_name();
+                // bilin: Chinese UIs show the Chinese product name; paths/services keep APP_NAME.
+                let app_name = match lang.as_str() {
+                    "zh-cn" | "zh-tw" => "比邻远程".to_owned(),
+                    _ => crate::get_app_name(),
+                };
                 if !app_name.contains("RustDesk") {
                     s = s.replace("RustDesk", &app_name);
                 } else {

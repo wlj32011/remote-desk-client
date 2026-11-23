@@ -1,0 +1,19 @@
+{
+  "app-name": "BiLin",
+  "override-settings": {
+    "custom-rendezvous-server": "106.15.131.38",
+    "relay-server": "106.15.131.38",
+    "key": "eVIYrhsCtIO1dkfMGRHIAALNJY43hMIHkoN2ArlHBKk=",
+    "enable-udp-punch": "Y",
+    "enable-ipv6-punch": "Y",
+    "enable-webrtc": "N",
+    "enable-check-update": "N",
+    "allow-auto-update": "N",
+    "hide-server-settings": "Y",
+    "hide-help-cards": "Y"
+  },
+  "default-settings": {
+    "enable-tcp-punch": "Y",
+    "relay-fallback-delay": "2.5"
+  }
+}

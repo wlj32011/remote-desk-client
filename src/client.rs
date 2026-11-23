@@ -583,20 +583,17 @@ impl Client {
             contained,
         )
         .boxed();
-        if has_webrtc_offerer {
-            return race_transports_prefer_webrtc(
-                preferred_fut,
-                vec![fallback_fut],
-                Self::relay_fallback_delay_ms(),
-                |result| result.0 .1,
-            )
-            .await;
-        }
-        let connect_futures = vec![preferred_fut, fallback_fut];
-        match select_ok(connect_futures).await {
-            Ok(conn) => Ok((conn.0 .0, conn.0 .1, conn.0 .2)),
-            Err(e) => Err(e),
-        }
+        // bilin: always prefer P2P here, not only when a WebRTC offer rides along. The
+        // TCP-only fallback request usually gets the peer's relay answer first; with plain
+        // `select_ok` that relay won even when the preferred request (UDP port / IPv6) was
+        // about to connect directly. Hold any relayed result for the fallback window instead.
+        race_transports_prefer_webrtc(
+            preferred_fut,
+            vec![fallback_fut],
+            Self::relay_fallback_delay_ms(),
+            |result| result.0 .1,
+        )
+        .await
     }
 
     fn is_expected_webrtc_ice_candidate(ice: &IceCandidate, session_key: &str) -> bool {
@@ -1185,6 +1182,20 @@ impl Client {
                                 )
                                 .await
                             }
+                        } else if connect_futures.len() > 1 {
+                            // bilin: the peer chose a relay (e.g. it classified itself as
+                            // symmetric NAT) but also sent its IPv6 endpoint, so the list is
+                            // [IPv6 punch, relay]. The relay's TCP connect almost always lands
+                            // first, which threw away a working IPv6 path; hold the relay for the
+                            // fallback window and let the direct IPv6 connection win.
+                            let direct_fut = connect_futures.remove(0);
+                            race_transports_prefer_webrtc(
+                                direct_fut,
+                                connect_futures,
+                                Self::relay_fallback_delay_ms(),
+                                |result| result.3,
+                            )
+                            .await
                         } else {
                             // Run all connection attempts concurrently, take the first success.
                             select_ok(connect_futures).await.map(|r| r.0)
