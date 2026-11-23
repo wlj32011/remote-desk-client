@@ -10,6 +10,7 @@ import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
 import 'package:flutter_hbb/common/widgets/custom_password.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
+import 'package:flutter_hbb/desktop/pages/bilin_home.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/widgets/update_progress.dart';
@@ -58,16 +59,21 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final isIncomingOnly = bind.isIncomingOnly();
+    // bilin: 新版主页布局（左导航 + 两张卡片），原有安装/权限/更新提示卡片放在顶部
     return _buildBlock(
-        child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        buildLeftPane(context),
-        if (!isIncomingOnly) const VerticalDivider(width: 1),
-        if (!isIncomingOnly) Expanded(child: buildRightPane(context)),
-      ],
-    ));
+      child: BilinHome(
+        notice: ChangeNotifierProvider.value(
+          value: gFFI.serverModel,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              buildPresetPasswordWarning(),
+              Obx(() => buildHelpCards(stateGlobal.updateUrl.value)),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildBlock({required Widget child}) {

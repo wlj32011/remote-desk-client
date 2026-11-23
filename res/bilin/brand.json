@@ -10,7 +10,8 @@
     "enable-check-update": "N",
     "allow-auto-update": "N",
     "hide-server-settings": "Y",
-    "hide-help-cards": "Y"
+    "hide-help-cards": "Y",
+    "api-server": "https://bilin.dccjin.cn"
   },
   "default-settings": {
     "enable-tcp-punch": "Y",
