@@ -94,7 +94,16 @@ jobs:
           vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
           doNotCache: false
 
+      # 编解码库几乎不变：装好的 vcpkg 结果整体缓存，命中就跳过 20 多分钟的编译
+      - name: Cache vcpkg installed
+        id: vcpkgcache
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-installed-x64-windows-static-${{ env.VCPKG_COMMIT_ID }}-${{ hashFiles('vcpkg.json') }}
+
       - name: Install vcpkg dependencies
+        if: steps.vcpkgcache.outputs.cache-hit != 'true'
         env:
           VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
         run: |
