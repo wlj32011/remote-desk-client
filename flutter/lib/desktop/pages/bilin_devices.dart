@@ -105,6 +105,13 @@ Future<void> bilinConnect(BuildContext context, String id) async {
           .timeout(const Duration(seconds: 5));
     } catch (_) {}
   }
+  // 远程窗口的标签读本机保存的备注，连接前把账号设备列表里的备注同步过去
+  final latest = bilinAb()?.peers.firstWhereOrNull((e) => e.id == id);
+  final alias = latest?.alias ?? '';
+  if (alias.isNotEmpty &&
+      bind.mainGetPeerOptionSync(id: id, key: 'alias') != alias) {
+    await bind.mainSetPeerAlias(id: id, alias: alias);
+  }
   if (!context.mounted) return;
   connect(context, id);
 }
