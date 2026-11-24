@@ -844,6 +844,9 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
     ));
     // Do not show keyboard for camera connection type.
     // 比邻：不放“键盘设置”（键盘模式等看不懂）
+    if (widget.ffi.connType == ConnType.defaultConn) {
+      toolbarItems.add(_BilinAudioButton(ffi: widget.ffi));
+    }
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
@@ -3042,7 +3045,41 @@ const Map<String, String> _bilinToolbarLabels = {
   'Start session recording': '录屏',
   'Stop session recording': '停止录屏',
   'Close': '断开',
+  'Unmute': '开声音',
+  'Mute': '关声音',
 };
+
+/// 比邻：声音开关（默认关，点一下传对方电脑的声音）
+class _BilinAudioButton extends StatefulWidget {
+  final FFI ffi;
+  const _BilinAudioButton({Key? key, required this.ffi}) : super(key: key);
+  @override
+  State<_BilinAudioButton> createState() => _BilinAudioButtonState();
+}
+
+class _BilinAudioButtonState extends State<_BilinAudioButton> {
+  @override
+  Widget build(BuildContext context) {
+    final perms = Provider.of<FfiModel>(context).permissions;
+    if (perms['audio'] == false) return const Offstage();
+    final sid = widget.ffi.sessionId;
+    final muted =
+        bind.sessionGetToggleOptionSync(sessionId: sid, arg: 'disable-audio');
+    return _IconMenuButton(
+      icon: Icon(muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+          color: Colors.white, size: 20)
+          .paddingAll(6),
+      tooltip: muted ? 'Unmute' : 'Mute',
+      onPressed: () async {
+        await bind.sessionToggleOption(sessionId: sid, value: 'disable-audio');
+        if (mounted) setState(() {});
+      },
+      color: muted ? _ToolbarTheme.inactiveColor : _ToolbarTheme.blueColor,
+      hoverColor:
+          muted ? _ToolbarTheme.hoverInactiveColor : _ToolbarTheme.hoverBlueColor,
+    );
+  }
+}
 
 Widget _bilinWithLabel(Widget icon, String tooltip, double? width) {
   final label = _bilinToolbarLabels[tooltip];

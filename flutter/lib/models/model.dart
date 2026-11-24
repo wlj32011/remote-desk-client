@@ -4172,6 +4172,13 @@ class FFI {
         connToken: connToken,
         loginMethod: loginMethod,
       );
+      // 比邻：每次远程默认不传声音，需要时在工具栏点“开声音”
+      if (isDesktop &&
+          connType == ConnType.defaultConn &&
+          !bind.sessionGetToggleOptionSync(
+              sessionId: sessionId, arg: 'disable-audio')) {
+        bind.sessionToggleOption(sessionId: sessionId, value: 'disable-audio');
+      }
     } else if (display != null) {
       if (displays == null) {
         debugPrint(

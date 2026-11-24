@@ -88,6 +88,14 @@ class _BilinHomeState extends State<BilinHome> {
   void initState() {
     super.initState();
     bilinLoadMode();
+    // 安装时没勾“开机自动启动”的，装好后第一次打开时关掉
+    if (isWindows && bind.mainIsInstalled()) {
+      final v = bind.mainGetLocalOption(key: 'bilin-autostart-after-install');
+      if (v.isNotEmpty) {
+        bind.mainSetLocalOption(key: 'bilin-autostart-after-install', value: '');
+        if (v == 'N') start_service(false);
+      }
+    }
     // 本机登记进账号（带免密哈希），同账号的电脑就能免密连本机。启动后和每次登录后都做
     Future.delayed(const Duration(seconds: 3), bilinSyncAccountDevices);
     ever(gFFI.userModel.userName, (String name) {

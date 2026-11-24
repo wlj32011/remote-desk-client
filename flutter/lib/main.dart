@@ -289,7 +289,8 @@ void runConnectionManagerScreen() async {
     const DesktopServerPage(),
     MyTheme.currentThemeMode(),
   );
-  final hide = await bind.cmGetConfig(name: "hide_cm") == 'true';
+  // 比邻：被控端默认不显示连接管理窗口（11-24 用户要求），只有需要点“接受”的连接才弹出
+  const hide = true;
   gFFI.serverModel.hideCm = hide;
   if (hide) {
     await hideCmWindow(isStartup: true);

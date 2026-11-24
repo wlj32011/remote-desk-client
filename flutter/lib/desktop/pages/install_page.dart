@@ -69,6 +69,7 @@ class _InstallPageBodyState extends State<_InstallPageBody>
   final RxBool startmenu = true.obs;
   final RxBool desktopicon = true.obs;
   final RxBool printer = false.obs;
+  final RxBool autostart = true.obs; // 比邻：开机自动启动，默认勾选
   final RxBool showProgress = false.obs;
   final RxBool btnEnabled = true.obs;
   final RxBool cancelEnabled = true.obs;
@@ -114,10 +115,6 @@ class _InstallPageBodyState extends State<_InstallPageBody>
     if (printer.value) {
       _loadPrinterStatus();
     }
-    // 比邻：打开安装页就自动开始安装（会弹一次 Windows 管理员确认），不用用户再点
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && btnEnabled.value) install();
-    });
   }
 
   @override
@@ -167,8 +164,11 @@ class _InstallPageBodyState extends State<_InstallPageBody>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(translate('Installation'),
+              Text('安装比邻远程',
                   style: Theme.of(context).textTheme.headlineMedium),
+              Text('可以点“更改路径”选择装到哪个盘',
+                      style: TextStyle(color: Theme.of(context).hintColor))
+                  .marginOnly(top: 6),
               Table(
                 columnWidths: const {
                   0: IntrinsicColumnWidth(),
@@ -215,7 +215,8 @@ class _InstallPageBodyState extends State<_InstallPageBody>
                   .marginOnly(bottom: 7),
               Option(desktopicon, label: 'Create desktop icon')
                   .marginOnly(bottom: 7),
-              Option(printer, label: 'Install {$appName} Printer'),
+              Option(autostart, label: '开机自动启动（推荐，关机重启后别人也能连上这台电脑）')
+                  .marginOnly(bottom: 14),
               Container(
                   padding: EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -296,6 +297,10 @@ class _InstallPageBodyState extends State<_InstallPageBody>
       if (startmenu.value) args += ' startmenu';
       if (desktopicon.value) args += ' desktopicon';
       if (printer.value) args += ' printer';
+      // 装好后新打开的比邻远程读这个值，决定开机自启开还是关
+      bind.mainSetLocalOption(
+          key: 'bilin-autostart-after-install',
+          value: autostart.value ? 'Y' : 'N');
       bind.installInstallMe(options: args, path: installPath);
     }
 
