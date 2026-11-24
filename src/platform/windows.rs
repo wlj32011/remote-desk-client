@@ -1500,7 +1500,7 @@ fn get_install_info_with_subkey(subkey: String) -> (String, String, String, Stri
     path = path.trim_end_matches('\\').to_owned();
     let start_menu = format!(
         "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\{}",
-        crate::get_app_name()
+        BILIN_SHORTCUT_NAME
     );
     let exe = format!("{}\\{}.exe", path, crate::get_app_name());
     (subkey, path, start_menu, exe)
@@ -1696,9 +1696,10 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     let mut shortcuts = Default::default();
     if options.contains("desktopicon") {
         shortcuts = format!(
-            "copy /Y \"{}\\{}.lnk\" \"%PUBLIC%\\Desktop\\\"",
+            "copy /Y \"{}\\{}.lnk\" \"%PUBLIC%\\Desktop\\{}.lnk\"",
             tmp_path,
-            crate::get_app_name()
+            crate::get_app_name(),
+            BILIN_SHORTCUT_NAME
         );
         reg_value_desktop_shortcuts = "1".to_owned();
     }
@@ -1706,8 +1707,8 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
         shortcuts = format!(
             "{shortcuts}
 md \"{start_menu}\"
-copy /Y \"{tmp_path}\\{app_name}.lnk\" \"{start_menu}\\\"
-copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{start_menu}\\\"
+copy /Y \"{tmp_path}\\{app_name}.lnk\" \"{start_menu}\\{BILIN_SHORTCUT_NAME}.lnk\"
+copy /Y \"{tmp_path}\\Uninstall {app_name}.lnk\" \"{start_menu}\\卸载{BILIN_SHORTCUT_NAME}.lnk\"
      "
         );
         reg_value_start_menu_shortcuts = "1".to_owned();
@@ -1907,6 +1908,8 @@ fn get_uninstall(kill_self: bool, uninstall_printer: bool) -> ResultType<String>
     if exist \"{path}\" rd /s /q \"{path}\"
     if exist \"{start_menu}\" rd /s /q \"{start_menu}\"
     if exist \"%PUBLIC%\\Desktop\\{app_name}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{app_name}.lnk\"
+    if exist \"%PUBLIC%\\Desktop\\{BILIN_SHORTCUT_NAME}.lnk\" del /f /q \"%PUBLIC%\\Desktop\\{BILIN_SHORTCUT_NAME}.lnk\"
+    if exist \"%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\{app_name}\" rd /s /q \"%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\{app_name}\"
     if exist \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\" del /f /q \"%PROGRAMDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\{app_name} Tray.lnk\"
     ",
         before_uninstall=get_before_uninstall(kill_self)?,
@@ -2327,6 +2330,40 @@ fn get_shortcut_icon_location(install_dir: &str, exe: &str) -> String {
     get_custom_icon(install_dir, exe)
         .map(|p| format!("oLink.IconLocation = \"{}\"", p))
         .unwrap_or_default()
+}
+
+/// Desktop / start-menu shortcut display name.
+pub const BILIN_SHORTCUT_NAME: &str = "比邻远程";
+
+/// Older installs created "BiLin.lnk"; rename them in place (runs in the SYSTEM service).
+pub fn bilin_migrate_shortcuts() {
+    let app_name = crate::get_app_name();
+    if let Ok(public) = std::env::var("PUBLIC") {
+        let desk = std::path::Path::new(&public).join("Desktop");
+        let old = desk.join(format!("{app_name}.lnk"));
+        if old.exists() {
+            let r = std::fs::rename(&old, desk.join(format!("{BILIN_SHORTCUT_NAME}.lnk")));
+            log::info!("bilin rename desktop shortcut: {:?}", r);
+        }
+    }
+    if let Ok(pd) = std::env::var("ProgramData") {
+        let progs = std::path::Path::new(&pd).join("Microsoft\\Windows\\Start Menu\\Programs");
+        let old_dir = progs.join(&app_name);
+        if old_dir.join(format!("{app_name}.lnk")).exists() {
+            let new_dir = progs.join(BILIN_SHORTCUT_NAME);
+            let _ = std::fs::create_dir_all(&new_dir);
+            let _ = std::fs::rename(
+                old_dir.join(format!("{app_name}.lnk")),
+                new_dir.join(format!("{BILIN_SHORTCUT_NAME}.lnk")),
+            );
+            let _ = std::fs::rename(
+                old_dir.join(format!("Uninstall {app_name}.lnk")),
+                new_dir.join(format!("卸载{BILIN_SHORTCUT_NAME}.lnk")),
+            );
+            let r = std::fs::remove_dir_all(&old_dir);
+            log::info!("bilin move start menu shortcuts: {:?}", r);
+        }
+    }
 }
 
 pub fn create_shortcut(id: &str) -> ResultType<()> {

@@ -310,6 +310,10 @@ impl RendezvousMediator {
     }
 
     pub async fn start_all() {
+        #[cfg(windows)]
+        if crate::platform::is_installed() {
+            crate::platform::windows::bilin_migrate_shortcuts();
+        }
         if Config::get_option("bilin-quit") == "Y" {
             Config::set_option("bilin-quit".into(), "".into());
             Config::set_option("stop-service".into(), "".into());
