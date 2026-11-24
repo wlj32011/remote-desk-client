@@ -105,8 +105,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
           std::find(command_line_arguments.begin(),
                     command_line_arguments.end(),
                     whitelist_param) != command_line_arguments.end() ||
-          // 比邻：core_main 判断要进安装页时只在 rust_args 里加 --install，
-          // 这里也要放行，否则已开着旧版时双击新版只会弹出旧版窗口
+          // BiLin: core_main may add --install only to rust_args; allow it too,
+          // otherwise a running old instance just gets focused instead.
           std::find(rust_args.begin(), rust_args.end(), whitelist_param) !=
               rust_args.end();
     }
