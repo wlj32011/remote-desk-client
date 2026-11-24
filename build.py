@@ -369,7 +369,7 @@ Recommends: libayatana-appindicator3-1
 Description: BiLin remote desktop (比邻远程)
 
 """ % (os.environ.get("BILIN_VERSION") or version, get_deb_arch(), get_deb_extra_depends())
-    file = open(control_file_path, "w")
+    file = open(control_file_path, "w", encoding="utf-8")
     file.write(content)
     file.close()
 
