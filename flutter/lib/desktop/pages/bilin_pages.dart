@@ -8,6 +8,7 @@ import 'package:flutter_hbb/desktop/pages/desktop_home_page.dart'
 import 'package:flutter_hbb/models/peer_model.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/models/server_model.dart';
+import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
 
@@ -284,17 +285,29 @@ class _GeneralSettingsState extends State<_GeneralSettings> {
         _row(
           context,
           '开机自动启动',
-          _switch(
-              installed && !serviceStopped,
-              installed
-                  ? (v) async {
-                      await start_service(v);
-                      setState(() {});
-                    }
-                  : null),
+          installed
+              ? _switch(!serviceStopped, (v) async {
+                  await start_service(v);
+                  setState(() {});
+                })
+              : ElevatedButton(
+                  onPressed: () async {
+                    await rustDeskWinManager.closeAllSubWindows();
+                    bind.mainGotoInstall();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: BilinColors.brand,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text('安装到本机'),
+                ),
           desc: installed
               ? 'Windows 启动后自动运行比邻远程，别人随时可以连上这台电脑'
-              : '需要先安装比邻远程（主页上方的“安装”提示）才能开机自启',
+              : '现在是免安装版，关掉就不能被连。点“安装到本机”装好后会开机自动运行，'
+                  '远程时也能操作管理员权限的窗口',
         ),
         _row(
           context,

@@ -4736,16 +4736,17 @@ pub async fn handle_hash(
             lc.write().unwrap().password_source = PasswordSource::SharedAb(shared_password);
         }
     }
+    // 比邻：同账号设备优先用个人地址簿里的哈希（对方自己维护、永远是最新的），
+    // 再退回本机记住的旧密码，避免以前记住的过期密码挡住免密
+    if password.is_empty() {
+        try_get_password_from_personal_ab(lc.clone(), &mut password);
+    }
     // peer config password
     if password.is_empty() {
         password = lc.read().unwrap().config.password.clone();
         if !password.is_empty() {
             lc.write().unwrap().password_source = Default::default();
         }
-    }
-    // personal ab password
-    if password.is_empty() {
-        try_get_password_from_personal_ab(lc.clone(), &mut password);
     }
 
     if password.is_empty() {

@@ -26,11 +26,12 @@ bool _syncing = false;
 BaseAb? bilinAb() =>
     gFFI.abModel.addressbooks[gFFI.abModel.personalAddressBookName()];
 
-/// 把本机（带免密哈希）和账号下登录过的电脑都放进个人地址簿。启动后、登录后、打开设备列表时调用。
+/// 把本机（带免密哈希）放进个人地址簿，并清理本机的重复记录。启动后、登录后、打开设备列表时调用。
 Future<void> bilinSyncAccountDevices() async {
   if (_syncing || !gFFI.userModel.isLogin) return;
   _syncing = true;
   try {
+    bilinAbRowCount.clear();
     await gFFI.abModel
         .pullAb(force: ForcePullAb.listAndCurrent, quiet: true);
     final name = gFFI.abModel.personalAddressBookName();
@@ -50,19 +51,31 @@ Future<void> bilinSyncAccountDevices() async {
         ? 'Windows'
         : (Platform.isMacOS ? 'Mac OS' : 'Linux');
 
-    final adds = <Map<String, dynamic>>[];
-    if (!ab.peers.any((p) => p.id == myId)) {
-      adds.add({'id': myId, 'hostname': host, 'platform': platform});
-    }
-    await gFFI.groupModel.pull(force: true, quiet: true);
-    for (final p in gFFI.groupModel.peersModel.peers) {
-      if (p.id == myId || ab.peers.any((e) => e.id == p.id)) continue;
-      if (adds.any((e) => e['id'] == p.id)) continue;
-      adds.add({'id': p.id, 'hostname': p.hostname, 'platform': p.platform});
-    }
-    if (adds.isNotEmpty) {
-      await gFFI.abModel.addPeersTo(adds, name);
+    // 只加本机，不替别的电脑加：两台电脑同时启动互相添加会在服务器上生成重复记录，
+    // 重复记录里没有密码哈希，会让免密失效（0.5.0 的问题）。每台电脑登录后自己加自己。
+    final mine = ab.peers.firstWhereOrNull((p) => p.id == myId);
+    if (mine == null) {
+      await gFFI.abModel.addPeersTo(
+          [{'id': myId, 'hostname': host, 'platform': platform}], name);
       ab = bilinAb();
+    } else if ((bilinAbRowCount[myId] ?? 0) > 1) {
+      // 服务器上本机有重复记录：逐条删掉（服务器一次只删一条）后按合并结果重新加一条
+      final keep = <String, dynamic>{
+        'id': myId,
+        'hostname': host.isNotEmpty ? host : mine.hostname,
+        'platform': platform,
+        'alias': mine.alias,
+        'tags': mine.tags,
+      };
+      final rows = bilinAbRowCount[myId]!;
+      var deleted = true;
+      for (var i = 0; i < rows && deleted; i++) {
+        deleted = await gFFI.abModel.deletePeers([myId]);
+      }
+      if (deleted) {
+        await gFFI.abModel.addPeersTo([keep], name);
+        ab = bilinAb();
+      }
     }
     final me = ab?.peers.firstWhereOrNull((p) => p.id == myId);
     if (me != null) {
@@ -79,6 +92,21 @@ Future<void> bilinSyncAccountDevices() async {
   } finally {
     _syncing = false;
   }
+}
+
+/// 从设备列表远程：本地缓存里对方还没有免密哈希（对方刚登录、刚升级）时，先重新拉一次地址簿再连，
+/// 这样不用等手动刷新就能免密。
+Future<void> bilinConnect(BuildContext context, String id) async {
+  final p = bilinAb()?.peers.firstWhereOrNull((e) => e.id == id);
+  if (p != null && p.hash.isEmpty) {
+    try {
+      await gFFI.abModel
+          .pullAb(force: ForcePullAb.current, quiet: true)
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
+  if (!context.mounted) return;
+  connect(context, id);
 }
 
 // ================= 无窗口连接：重启 / 关机 =================
@@ -578,7 +606,7 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
         onTap: _batch ? toggle : () => setState(() => _selected = p.id),
-        onDoubleTap: (_batch || isMe) ? null : () => connect(context, p.id),
+        onDoubleTap: (_batch || isMe) ? null : () => bilinConnect(context, p.id),
         onSecondaryTapDown: canManage && !_batch
             ? (d) {
                 setState(() => _selected = p.id);
@@ -650,7 +678,7 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
             if (sel) ...[
               if (!isMe)
                 ElevatedButton(
-                  onPressed: () => connect(context, p.id),
+                  onPressed: () => bilinConnect(context, p.id),
                   style: _primary(),
                   child: const Text('远程控制'),
                 ),
@@ -749,7 +777,7 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
     if (!mounted || v == null) return;
     switch (v) {
       case 'connect':
-        connect(context, p.id);
+        bilinConnect(context, p.id);
         break;
       case 'alias':
         _aliasDialog(context, p);
@@ -912,6 +940,14 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
             ])),
       ),
     );
+    // 有设备缺免密哈希时先拉一次最新地址簿
+    if (targets.any((p) => p.hash.isEmpty)) {
+      try {
+        await gFFI.abModel
+            .pullAb(force: ForcePullAb.current, quiet: true)
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {}
+    }
     // 最多同时 4 台
     final queue = [...targets];
     Future<void> worker() async {

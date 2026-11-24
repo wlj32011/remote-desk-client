@@ -29,6 +29,9 @@ bool filterAbTagByIntersection() {
   return bind.mainGetLocalOption(key: filterAbTagOption) == 'Y';
 }
 
+/// 比邻：上次拉取个人地址簿时每个设备 ID 在服务器上有几条记录（>1 是重复，本机会自己清理掉）
+final bilinAbRowCount = <String, int>{};
+
 const _personalAddressBookName = "My address book";
 const _legacyAddressBookName = "Legacy address book";
 
@@ -1430,6 +1433,7 @@ class Ab extends BaseAb {
   }
 
   Future<bool> _fetchPeers(List<Peer> tmpPeers, {quiet = false}) async {
+    if (personal) bilinAbRowCount.clear();
     final api = "${await bind.mainGetApiServer()}/api/ab/peers";
     int? statusCode;
     try {
@@ -1469,10 +1473,19 @@ class Ab extends BaseAb {
             if (data is List) {
               for (final profile in data) {
                 final u = Peer.fromJson(profile);
+                if (personal) {
+                  bilinAbRowCount[u.id] = (bilinAbRowCount[u.id] ?? 0) + 1;
+                }
                 int index = tmpPeers.indexWhere((e) => e.id == u.id);
                 if (index < 0) {
                   tmpPeers.add(u);
                 } else {
+                  // 比邻：服务器上同一台设备可能有重复记录（两台电脑同时互相添加），
+                  // 合并时保留非空的密码哈希、备注、分组，不让空记录把哈希盖掉
+                  final old = tmpPeers[index];
+                  if (u.hash.isEmpty) u.hash = old.hash;
+                  if (u.alias.isEmpty) u.alias = old.alias;
+                  if (u.tags.isEmpty) u.tags = old.tags;
                   tmpPeers[index] = u;
                 }
               }
