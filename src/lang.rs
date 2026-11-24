@@ -134,6 +134,10 @@ fn resolve_lang(saved_lang: &str, locale: &str, cjk_fallback: bool) -> String {
     if cjk_fallback && is_cjk_lang(&lang) {
         return "en".to_owned();
     }
+    // bilin: 只做中文版，没手动选过语言就用简体中文，不跟系统语言
+    if lang.is_empty() || lang == "default" {
+        lang = "zh-cn".to_owned();
+    }
     if lang.is_empty() {
         // zh_CN on Linux, zh-Hans-CN on mac, zh_CN_#Hans on Android
         if locale.starts_with("zh") {

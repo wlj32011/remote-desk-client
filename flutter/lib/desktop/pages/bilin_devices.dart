@@ -55,7 +55,13 @@ Future<void> bilinSyncAccountDevices() async {
     } catch (_) {}
     final platform = Platform.isWindows
         ? 'Windows'
-        : (Platform.isMacOS ? 'Mac OS' : 'Linux');
+        : Platform.isMacOS
+            ? 'Mac OS'
+            : Platform.isAndroid
+                ? 'Android'
+                : Platform.isIOS
+                    ? 'iOS'
+                    : 'Linux';
 
     // 只加本机，不替别的电脑加：两台电脑同时启动互相添加会在服务器上生成重复记录，
     // 重复记录里没有密码哈希，会让免密失效（0.5.0 的问题）。每台电脑登录后自己加自己。

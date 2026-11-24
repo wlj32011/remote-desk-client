@@ -8,6 +8,8 @@ import '../../common/widgets/chat_page.dart';
 import '../../models/platform_model.dart';
 import '../../models/state_model.dart';
 import 'connection_page.dart';
+import 'bilin_mobile.dart';
+import '../../desktop/pages/bilin_home.dart' show BilinColors;
 
 abstract class PageShape extends Widget {
   final String title = "";
@@ -47,16 +49,15 @@ class HomePageState extends State<HomePage> {
 
   void initPages() {
     _pages.clear();
+    // 比邻远程：远程 / 本机（安卓共享屏幕）/ 我的
     if (!bind.isIncomingOnly()) {
-      _pages.add(ConnectionPage(
-        appBarActions: [],
-      ));
+      _pages.add(BilinMobileRemotePage());
     }
     if (isAndroid && !bind.isOutgoingOnly()) {
-      _chatPageTabIndex = _pages.length;
-      _pages.addAll([ChatPage(type: ChatPageType.mobileMain), ServerPage()]);
+      _chatPageTabIndex = -1;
+      _pages.add(ServerPage());
     }
-    _pages.add(SettingsPage());
+    _pages.add(BilinMobileMinePage());
   }
 
   @override
@@ -76,6 +77,8 @@ class HomePageState extends State<HomePage> {
           // backgroundColor: MyTheme.grayBg,
           appBar: AppBar(
             centerTitle: true,
+            backgroundColor: BilinColors.brand,
+            foregroundColor: Colors.white,
             title: appTitle(),
             actions: _pages.elementAt(_selectedIndex).appBarActions,
           ),
@@ -150,7 +153,7 @@ class HomePageState extends State<HomePage> {
         ],
       );
     }
-    return Text(bind.mainGetAppNameSync());
+    return const Text('比邻远程');
   }
 }
 

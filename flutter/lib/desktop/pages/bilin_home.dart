@@ -1099,7 +1099,7 @@ class _LoginDialogState extends State<_LoginDialog> {
     return Dialog(
       backgroundColor: BilinColors.card(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: SizedBox(
+      child: SingleChildScrollView(child: SizedBox(
         width: 420,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(28, 24, 28, 22),
@@ -1141,6 +1141,7 @@ class _LoginDialogState extends State<_LoginDialog> {
                   decoration: _deco('再输一次密码', Icons.lock_outline),
                 ),
               ],
+              if (!isMobile) ...[
               const SizedBox(height: 18),
               Text('这台电脑的使用方式',
                   style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
@@ -1150,6 +1151,7 @@ class _LoginDialogState extends State<_LoginDialog> {
                 const SizedBox(width: 10),
                 _modeOption('incoming', '仅被控', '只让别人控制这台电脑'),
               ]),
+              ],
               if (_error.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 Text(_error,
@@ -1192,7 +1194,7 @@ class _LoginDialogState extends State<_LoginDialog> {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 }
