@@ -187,7 +187,7 @@ class BilinDevicesPage extends StatefulWidget {
 }
 
 class _BilinDevicesPageState extends State<BilinDevicesPage> {
-  String _group = 'all'; // all / recent / tag:<分组名>
+  String _group = 'default'; // default（默认分组＝没进任何分组的）/ tag:<分组名>
   String _filter = 'all'; // all / online / offline
   String _selected = '';
   bool _batch = false;
@@ -248,8 +248,12 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
   bool _isOn(Peer p) => p.id == _myId || (_online[p.id] ?? p.online);
 
   List<Peer> _peersOf(String group) {
-    if (group == 'recent') return gFFI.recentPeersModel.peers;
     final all = _accountPeers;
+    if (group == 'search') return all; // 搜索时在所有设备里找
+    if (group == 'default') {
+      final tags = _tags;
+      return all.where((p) => !p.tags.any((t) => tags.contains(t))).toList();
+    }
     if (group.startsWith('tag:')) {
       final t = group.substring(4);
       return all.where((p) => p.tags.contains(t)).toList();
@@ -373,64 +377,63 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          TextField(
-            controller: _search,
-            onChanged: (_) => setState(() {}),
-            style: const TextStyle(fontSize: 14),
-            decoration: InputDecoration(
-              hintText: '搜索名称 / 识别码',
-              prefixIcon: const Icon(Icons.search, size: 20),
-              isDense: true,
-              filled: true,
-              fillColor: BilinColors.field(context),
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide.none),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _search,
+                onChanged: (_) => setState(() {}),
+                style: const TextStyle(fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: '搜索设备',
+                  prefixIcon: const Icon(Icons.search, size: 20),
+                  isDense: true,
+                  filled: true,
+                  fillColor: BilinColors.field(context),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none),
+                ),
+              ),
             ),
-          ),
+            const SizedBox(width: 8),
+            Tooltip(
+              message: '新建分组',
+              child: Material(
+                color: BilinColors.field(context),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: loggedIn
+                      ? () => _newGroupDialog(context)
+                      : () => showBilinLoginDialog(context),
+                  child: SizedBox(
+                    width: 38,
+                    height: 38,
+                    child: Icon(Icons.add,
+                        size: 22, color: BilinColors.text(context)),
+                  ),
+                ),
+              ),
+            ),
+          ]),
           const SizedBox(height: 18),
           header('我的设备'),
-          item('all', Icons.devices_outlined, '全部设备', _peersOf('all')),
-          const SizedBox(height: 2),
-          item('recent', Icons.history, '最近连接', _peersOf('recent')),
-          if (loggedIn) ...[
-            const SizedBox(height: 18),
-            header('分组',
-                trailing: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _newGroupDialog(context),
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Row(children: [
-                      Icon(Icons.add, size: 16, color: BilinColors.brand),
-                      const Text('新建',
-                          style: TextStyle(
-                              fontSize: 12, color: BilinColors.brand)),
-                    ]),
+          Expanded(
+            child: ListView(
+              children: [
+                item('default', Icons.folder_outlined, '默认分组',
+                    _peersOf('default')),
+                for (final t in tags)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: item('tag:$t', Icons.folder_outlined, t,
+                        _peersOf('tag:$t'),
+                        tag: t),
                   ),
-                )),
-            Expanded(
-              child: tags.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
-                      child: Text('还没有分组。点“新建”建一个，再把电脑移进去',
-                          style: TextStyle(
-                              fontSize: 12, color: BilinColors.sub(context))),
-                    )
-                  : ListView(
-                      children: [
-                        for (final t in tags)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 2),
-                            child: item('tag:$t', Icons.folder_outlined, t,
-                                _peersOf('tag:$t'),
-                                tag: t),
-                          ),
-                      ],
-                    ),
+              ],
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -440,7 +443,7 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
 
   Widget _right(BuildContext context) {
     final loggedIn = gFFI.userModel.userName.value.isNotEmpty;
-    if (_group != 'recent' && !loggedIn) {
+    if (!loggedIn) {
       return Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(Icons.devices_outlined, size: 56, color: BilinColors.sub(context)),
@@ -460,8 +463,8 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
         ]),
       );
     }
-    final all = _peersOf(_group);
     final kw = _search.text.trim().toLowerCase();
+    final all = _peersOf(kw.isNotEmpty ? 'search' : _group);
     final searched = all.where((p) {
       if (kw.isEmpty) return true;
       return p.id.contains(kw.replaceAll(' ', '')) ||
@@ -506,10 +509,10 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
       );
     }
 
-    final title = _group == 'all'
-        ? '全部设备'
-        : (_group == 'recent' ? '最近连接' : _group.substring(4));
-    final canManage = _group != 'recent';
+    final title = kw.isNotEmpty
+        ? '搜索结果'
+        : (_group == 'default' ? '默认分组' : _group.substring(4));
+    const canManage = true;
     return Padding(
       padding: const EdgeInsets.fromLTRB(22, 18, 18, 10),
       child: Column(
@@ -558,11 +561,13 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
             child: shown.isEmpty
                 ? Center(
                     child: Text(
-                        _group == 'all'
-                            ? '没有设备。在别的电脑上安装比邻远程并登录同一账号，就会出现在这里'
-                            : (_group == 'recent'
-                                ? '还没有连接记录'
-                                : '这个分组还没有电脑。在设备上右键，选“移到分组”'),
+                        kw.isNotEmpty
+                            ? '没找到匹配的设备'
+                            : (_accountPeers.isEmpty
+                                ? '没有设备。在别的电脑上安装比邻远程并登录同一账号，就会出现在这里'
+                                : (_group == 'default'
+                                    ? '默认分组里没有电脑'
+                                    : '这个分组还没有电脑。在设备上右键，选“移到分组”')),
                         style: TextStyle(
                             fontSize: 14, color: BilinColors.sub(context))))
                 : ListView.separated(
@@ -826,7 +831,7 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
           '删除分组“$tag”？分组里的电脑不会删除，只是不再属于这个分组。', '删除');
       if (!ok) return;
       await gFFI.abModel.deleteTag(tag);
-      if (_group == 'tag:$tag') setState(() => _group = 'all');
+      if (_group == 'tag:$tag') setState(() => _group = 'default');
     }
   }
 
@@ -870,7 +875,7 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
                   value: t,
                   groupValue: chosen ?? '',
                   onChanged: (v) => setS(() => chosen = v),
-                  title: Text(t.isEmpty ? '不分组' : t),
+                  title: Text(t.isEmpty ? '默认分组' : t),
                   dense: true,
                   activeColor: BilinColors.brand,
                 ),
@@ -911,7 +916,7 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
       _batch = false;
       _checked.clear();
     });
-    showToast(r.isEmpty ? '已移出分组' : '已移到“$r”');
+    showToast(r.isEmpty ? '已移到“默认分组”' : '已移到“$r”');
   }
 
   Future<void> _power(BuildContext context, List<Peer> peers, String action) async {

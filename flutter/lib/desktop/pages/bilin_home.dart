@@ -298,16 +298,29 @@ class _AssistPage extends StatelessWidget {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    IntrinsicHeight(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: const [
-                          Expanded(child: _LocalCard()),
-                          SizedBox(width: 18),
-                          Expanded(child: _RemoteCard()),
-                        ],
-                      ),
-                    ),
+                    // 窗口窄（每张卡不到约 340 宽）时两张卡上下排，避免字被截掉
+                    LayoutBuilder(builder: (context, c) {
+                      if (c.maxWidth < 700) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: const [
+                            _LocalCard(),
+                            SizedBox(height: 16),
+                            IntrinsicHeight(child: _RemoteCard()),
+                          ],
+                        );
+                      }
+                      return const IntrinsicHeight(
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(child: _LocalCard()),
+                            SizedBox(width: 18),
+                            Expanded(child: _RemoteCard()),
+                          ],
+                        ),
+                      );
+                    }),
                     const SizedBox(height: 24),
                     _RecentRow(onShowAll: onShowAll),
                   ],
@@ -426,14 +439,18 @@ class _InfoField extends StatelessWidget {
               Expanded(
                 child: AnimatedBuilder(
                   animation: listenable,
-                  builder: (context, _) => SelectableText(
-                    value(),
-                    maxLines: 1,
-                    style: TextStyle(
-                      fontSize: big ? 32 : 24,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.0,
-                      color: BilinColors.text(context),
+                  builder: (context, _) => FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      value(),
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: big ? 32 : 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.0,
+                        color: BilinColors.text(context),
+                      ),
                     ),
                   ),
                 ),
@@ -483,16 +500,20 @@ class _PasswordFieldState extends State<_PasswordField> {
                     final shown = widget.showOneTime
                         ? (_visible ? pwd : '••••••')
                         : '已设置固定密码';
-                    return SelectableText(
-                      shown.isEmpty ? '-' : shown,
-                      maxLines: 1,
-                      style: TextStyle(
-                        fontSize: widget.showOneTime ? 28 : 15,
-                        fontWeight: widget.showOneTime
-                            ? FontWeight.w800
-                            : FontWeight.normal,
-                        letterSpacing: widget.showOneTime ? 1.2 : 0,
-                        color: BilinColors.text(context),
+                    return FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        shown.isEmpty ? '-' : shown,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: widget.showOneTime ? 28 : 15,
+                          fontWeight: widget.showOneTime
+                              ? FontWeight.w800
+                              : FontWeight.normal,
+                          letterSpacing: widget.showOneTime ? 1.2 : 0,
+                          color: BilinColors.text(context),
+                        ),
                       ),
                     );
                   },
@@ -553,7 +574,11 @@ class _RemoteCardState extends State<_RemoteCard> {
       showToast('请先输入对方的识别码');
       return;
     }
-    connect(context, _id, isFileTransfer: file);
+    if (file) {
+      connect(context, _id, isFileTransfer: true);
+    } else {
+      bilinConnect(context, _id);
+    }
   }
 
   @override
@@ -564,6 +589,7 @@ class _RemoteCardState extends State<_RemoteCard> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           bilinTitle(context, '控制远程设备'),
+          const SizedBox(height: 14),
           const Spacer(),
           TextField(
             controller: _idCtrl,
@@ -625,12 +651,18 @@ class _RemoteCardState extends State<_RemoteCard> {
             ],
           ),
           const SizedBox(height: 12),
-          Row(children: [
-            Icon(Icons.content_paste_rounded,
-                size: 15, color: BilinColors.sub(context)),
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(Icons.content_paste_rounded,
+                  size: 15, color: BilinColors.sub(context)),
+            ),
             const SizedBox(width: 6),
-            Text('传文件：在本机复制文件，到远程画面里粘贴即可',
-                style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
+            Expanded(
+              child: Text('传文件：在本机复制文件，到远程画面里粘贴即可',
+                  style:
+                      TextStyle(fontSize: 13, color: BilinColors.sub(context))),
+            ),
           ]),
           const Spacer(),
         ],
@@ -689,17 +721,21 @@ class _RecentRowState extends State<_RecentRow> {
                 ),
               )
             else
-              Row(
-                children: [
-                  for (var i = 0; i < 4; i++) ...[
-                    if (i > 0) const SizedBox(width: 14),
-                    Expanded(
-                        child: i < peers.length
-                            ? _PeerCard(peer: peers[i])
-                            : const SizedBox()),
+              LayoutBuilder(builder: (context, c) {
+                final cols = ((c.maxWidth + 14) ~/ (210 + 14)).clamp(1, 4);
+                final shown = peers.take(cols).toList();
+                return Row(
+                  children: [
+                    for (var i = 0; i < cols; i++) ...[
+                      if (i > 0) const SizedBox(width: 14),
+                      Expanded(
+                          child: i < shown.length
+                              ? _PeerCard(peer: shown[i])
+                              : const SizedBox()),
+                    ],
                   ],
-                ],
-              ),
+                );
+              }),
           ],
         );
       }),
@@ -712,6 +748,9 @@ class _PeerCard extends StatelessWidget {
   const _PeerCard({required this.peer});
 
   String get _name {
+    // 优先用账号设备列表里的备注
+    final ab = bilinAb()?.peers.firstWhereOrNull((e) => e.id == peer.id);
+    if (ab != null && ab.alias.isNotEmpty) return ab.alias;
     if (peer.alias.isNotEmpty) return peer.alias;
     if (peer.hostname.isNotEmpty) return peer.hostname;
     return groupId(peer.id);
@@ -732,7 +771,7 @@ class _PeerCard extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => connect(context, peer.id),
+        onTap: () => bilinConnect(context, peer.id),
         child: BilinCard(
           padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
           child: Row(
@@ -743,15 +782,18 @@ class _PeerCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(_name,
+                    // 账号设备列表拉下来后自动换成备注名
+                    Obx(() => Text(_name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
-                            color: BilinColors.text(context))),
+                            color: BilinColors.text(context)))),
                     const SizedBox(height: 4),
                     Text(groupId(peer.id),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                             fontSize: 14, color: BilinColors.sub(context))),
                     const SizedBox(height: 8),
