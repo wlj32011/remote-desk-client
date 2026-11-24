@@ -96,6 +96,17 @@ class _BilinHomeState extends State<BilinHome> {
         if (v == 'N') start_service(false);
       }
     }
+    // 托盘点过“退出”的，再打开时恢复被控
+    bind.mainGetOptions().then((s) {
+      try {
+        final m = Map<String, dynamic>.from(jsonDecode(s));
+        if (m['bilin-quit'] == 'Y') {
+          m.remove('bilin-quit');
+          m.remove('stop-service');
+          bind.mainSetOptions(json: jsonEncode(m));
+        }
+      } catch (_) {}
+    });
     // 本机登记进账号（带免密哈希），同账号的电脑就能免密连本机。启动后和每次登录后都做
     Future.delayed(const Duration(seconds: 3), bilinSyncAccountDevices);
     ever(gFFI.userModel.userName, (String name) {

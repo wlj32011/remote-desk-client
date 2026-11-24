@@ -297,6 +297,7 @@ class _InstallPageBodyState extends State<_InstallPageBody>
       if (startmenu.value) args += ' startmenu';
       if (desktopicon.value) args += ' desktopicon';
       if (printer.value) args += ' printer';
+      if (autostart.value) args += ' bilin-autostart';
       // 装好后新打开的比邻远程读这个值，决定开机自启开还是关
       bind.mainSetLocalOption(
           key: 'bilin-autostart-after-install',

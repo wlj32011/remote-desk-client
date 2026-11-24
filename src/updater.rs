@@ -159,7 +159,11 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
     }
 
     let mut last_check_time = Instant::now();
-    let mut check_interval = DUR_ONE_DAY;
+    #[cfg(target_os = "windows")]
+    let check_every = BILIN_CHECK_INTERVAL;
+    #[cfg(not(target_os = "windows"))]
+    let check_every = DUR_ONE_DAY;
+    let mut check_interval = check_every;
     loop {
         let recv_res = rx_msg.recv_timeout(check_interval);
         match &recv_res {
@@ -178,7 +182,7 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
                     check_interval = RETRY_INTERVAL;
                 } else {
                     last_check_time = Instant::now();
-                    check_interval = DUR_ONE_DAY;
+                    check_interval = check_every;
                 }
             }
             Ok(UpdateMsg::Exit) => break,
@@ -186,7 +190,68 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
     }
 }
 
+/// 比邻自动升级：服务器上放 latest.json（version/url/size/sha256），比本机新就下载、校验后静默升级
+#[cfg(target_os = "windows")]
+const BILIN_UPDATE_JSON: &str = "https://bilin.dccjin.cn/update/latest.json";
+#[cfg(target_os = "windows")]
+const BILIN_UPDATE_PREFIX: &str = "https://bilin.dccjin.cn/update/";
+#[cfg(target_os = "windows")]
+const BILIN_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+#[cfg(target_os = "windows")]
+fn bilin_version_tuple(v: &str) -> Vec<u32> {
+    v.trim()
+        .split('.')
+        .map(|x| x.trim().parse::<u32>().unwrap_or(0))
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn bilin_check_update() -> ResultType<()> {
+    if crate::platform::is_msi_installed()? {
+        return Ok(());
+    }
+    let client = crate::hbbs_http::create_http_client_with_url_strict(BILIN_UPDATE_JSON)?;
+    let resp = client.get(BILIN_UPDATE_JSON).send()?;
+    if !resp.status().is_success() {
+        bail!("bilin update: latest.json {}", resp.status());
+    }
+    let v: serde_json::Value = serde_json::from_str(&resp.text()?)?;
+    let version = v["version"].as_str().unwrap_or_default().to_owned();
+    let url = v["url"].as_str().unwrap_or_default().to_owned();
+    let sha256 = v["sha256"].as_str().unwrap_or_default().to_lowercase();
+    let size = v["size"].as_u64().unwrap_or(0);
+    if version.is_empty() || bilin_version_tuple(&version) <= bilin_version_tuple(crate::BILIN_VERSION)
+    {
+        log::debug!("bilin update: no newer version ({} vs {})", version, crate::BILIN_VERSION);
+        return Ok(());
+    }
+    let file_name = url.strip_prefix(BILIN_UPDATE_PREFIX).unwrap_or_default();
+    if file_name.is_empty()
+        || !file_name.ends_with(".exe")
+        || !file_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        || sha256.len() != 64
+        || size == 0
+    {
+        bail!("bilin update: bad latest.json");
+    }
+    log::info!("bilin update: new version {} -> {}", crate::BILIN_VERSION, version);
+    let file_path = std::env::temp_dir().join(file_name);
+    ensure_verified_update_artifact(&url, &file_path, size, &sha256)?;
+    if has_no_active_conns() {
+        update_new_version(false, &version, &file_path, &sha256);
+    }
+    Ok(())
+}
+
 fn check_update(manually: bool) -> ResultType<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = manually;
+        return bilin_check_update();
+    }
     // On macOS, auto-update is handled by check_update_as_root() in the service process.
     // The shared check_update() path is only used for manual update checks from the GUI.
     #[cfg(target_os = "macos")]

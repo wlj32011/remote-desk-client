@@ -35,6 +35,12 @@ pub(crate) mod update_hash;
 mod manual_update;
 mod version;
 pub use version::*;
+
+/// 比邻版本号，编译时由 b-build.ps1 传入环境变量 BILIN_VERSION
+pub const BILIN_VERSION: &str = match option_env!("BILIN_VERSION") {
+    Some(v) => v,
+    None => "0.0.0",
+};
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]
 mod bridge_generated;
 #[cfg(any(target_os = "android", target_os = "ios", feature = "flutter"))]

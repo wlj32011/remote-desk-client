@@ -1631,6 +1631,10 @@ pub fn install_me(options: &str, path: String, silent: bool, debug: bool) -> Res
     if get_windows_installer_state(&installed_subkey)? == Some(true) {
         bail!("Cannot install the EXE package over an existing MSI installation");
     }
+    if options.contains("bilin-autostart") {
+        Config::set_option("stop-service".into(), "".into());
+        Config::set_option("bilin-quit".into(), "".into());
+    }
     let uninstall_str = get_uninstall(false, false)?;
     let mut path = path.trim_end_matches('\\').to_owned();
     let (subkey, _path, start_menu, exe) = get_default_install_info();

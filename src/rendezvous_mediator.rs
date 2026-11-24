@@ -310,6 +310,10 @@ impl RendezvousMediator {
     }
 
     pub async fn start_all() {
+        if Config::get_option("bilin-quit") == "Y" {
+            Config::set_option("bilin-quit".into(), "".into());
+            Config::set_option("stop-service".into(), "".into());
+        }
         crate::test_nat_type();
         if config::is_outgoing_only() {
             loop {

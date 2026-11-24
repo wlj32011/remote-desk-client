@@ -1165,7 +1165,8 @@ pub fn main_get_license() -> String {
 }
 
 pub fn main_get_version() -> String {
-    get_version()
+    // 比邻：界面显示比邻自己的版本号
+    crate::BILIN_VERSION.to_string()
 }
 
 pub fn main_get_fav() -> Vec<String> {

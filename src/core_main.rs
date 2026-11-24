@@ -267,13 +267,8 @@ pub fn core_main() -> Option<CoreMainAction> {
                         }
                     },
                 };
-                Toast::new(Toast::POWERSHELL_APP_ID)
-                    .title(&config::APP_NAME.read().unwrap())
-                    .text1(&translate(text))
-                    .sound(Some(Sound::Default))
-                    .duration(Duration::Short)
-                    .show()
-                    .ok();
+                // 比邻：自动升级静默进行，不弹通知
+                log::info!("bilin update: {}", text);
                 return None;
             } else if args[0] == "--after-install" {
                 if let Err(err) = platform::run_after_install() {
@@ -925,10 +920,10 @@ fn bilin_should_auto_install() -> bool {
     if !crate::platform::is_installed() {
         return true;
     }
-    // 已装旧版、现在双击的是新版单文件：进安装页覆盖升级
+    // 已经装过、现在双击的是另一份单文件（新版或重装）：进安装页，可以换位置
     let (_, _, _, exe) = crate::platform::windows::get_install_info();
     let cur = std::env::current_exe()
         .map(|p| p.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    cur != exe.to_lowercase() && crate::ui_interface::is_installed_lower_version()
+    !exe.is_empty() && cur != exe.to_lowercase()
 }

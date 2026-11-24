@@ -70,7 +70,7 @@ fn make_tray() -> hbb_common::ResultType<()> {
     // The tray icon is only shown when the service is running, so we don't need to check
     // the `stop-service` option here.
     let quit_i = if !hide_stop_service {
-        Some(MenuItem::new(translate("Stop service".to_owned()), true, None))
+        Some(MenuItem::new(translate("Exit".to_owned()), true, None))
     } else {
         None
     };
@@ -196,26 +196,32 @@ fn make_tray() -> hbb_common::ResultType<()> {
                         return;
                     }
                     */
-                    // Remove the icon first: on success `uninstall_service()` ends
-                    // this process with `std::process::exit`, which skips the
-                    // destructor that would remove it, leaving a ghost icon behind.
+                    // 比邻“退出”：关掉界面和托盘，这次开机内别人连不上；
+                    // 后台服务和开机自启都保留，重启电脑或再打开比邻远程就恢复。
                     #[cfg(windows)]
                     let _ = _tray_icon
                         .lock()
                         .unwrap()
                         .as_mut()
                         .map(|t| t.set_visible(false));
-                    if !crate::platform::uninstall_service(false, false) {
-                        *control_flow = ControlFlow::Exit;
-                    }
-                    // Still alive, so stopping the service failed or was cancelled
-                    // in the UAC prompt. Show the icon again.
+                    crate::ipc::set_option("bilin-quit", "Y");
+                    crate::ipc::set_option("stop-service", "Y");
                     #[cfg(windows)]
-                    let _ = _tray_icon
-                        .lock()
-                        .unwrap()
-                        .as_mut()
-                        .map(|t| t.set_visible(true));
+                    {
+                        use std::os::windows::process::CommandExt;
+                        let filter = format!("PID ne {}", std::process::id());
+                        let _ = std::process::Command::new("taskkill")
+                            .args([
+                                "/F",
+                                "/IM",
+                                &format!("{}.exe", crate::get_app_name()),
+                                "/FI",
+                                &filter,
+                            ])
+                            .creation_flags(0x08000000)
+                            .status();
+                    }
+                    *control_flow = ControlFlow::Exit;
                 } else if event.id == open_i.id() {
                     open_func();
                 }
