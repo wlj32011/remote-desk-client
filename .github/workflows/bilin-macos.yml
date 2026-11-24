@@ -1,0 +1,123 @@
+# 比邻远程（BiLin）macOS 构建：Intel x86_64 版 dmg（Apple 芯片的 Mac 通过 Rosetta 也能用）。
+# 未签名：第一次打开要到「系统设置 → 隐私与安全性」点「仍要打开」；有 Apple 开发者账号后再加签名和公证。
+# 手动触发：Actions → BiLin macOS build。产物：bilin-macos-dmg  BiLin-<版本>-x86_64.dmg
+# 基于上游 .github/workflows/flutter-build.yml 的 build-for-macOS（x86_64）。
+name: BiLin macOS build
+
+on:
+  workflow_dispatch:
+    inputs:
+      bilin_version:
+        description: "比邻远程版本号"
+        required: false
+        default: "0.6.0"
+
+env:
+  MAC_RUST_VERSION: "1.81"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  BILIN_VERSION: "${{ inputs.bilin_version || '0.6.0' }}"
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-macos-x64:
+    needs: [generate-bridge]
+    runs-on: macos-15-intel
+    timeout-minutes: 180
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install build runtime
+        run: |
+          brew install llvm create-dmg
+          command -v pkg-config >/dev/null || brew install pkg-config
+
+      - name: Install NASM
+        run: |
+          wget -q https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/macosx/nasm-2.16.03-macosx.zip
+          unzip -q nasm-2.16.03-macosx.zip
+          sudo cp nasm-2.16.03/nasm /usr/local/bin/nasm
+          nasm --version
+
+      - name: Install flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+
+      - name: Patch flutter
+        run: |
+          cd $(dirname $(dirname $(which flutter)))
+          git apply ${{ github.workspace }}/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Workaround for flutter issue
+        shell: bash
+        run: |
+          cd "$(dirname "$(which flutter)")"
+          sed -i -e 's/_setFramesEnabledState(false);/\/\/_setFramesEnabledState(false);/g' ../packages/flutter/lib/src/scheduler/binding.dart
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.MAC_RUST_VERSION }}
+          targets: x86_64-apple-darwin
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: bilin-macos-x64
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        run: |
+          if ! $VCPKG_ROOT/vcpkg install --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"; echo "======"; tail -80 "$_1"; echo "======"; echo ""
+            done
+            exit 1
+          fi
+
+      - name: Build BiLin
+        run: |
+          N=$(echo $BILIN_VERSION | awk -F. '{print $1*10000+$2*100+$3}')
+          sed -i '' "s/^version: .*/version: $BILIN_VERSION+$N/" flutter/pubspec.yaml
+          ./build.py --flutter --hwcodec --unix-file-copy-paste
+          test -d ./flutter/build/macos/Build/Products/Release/BiLin.app
+
+      - name: Create dmg
+        run: |
+          CREATE_DMG="$(readlink -f "$(command -v create-dmg)")"
+          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
+          create-dmg --volname "比邻远程" --icon "BiLin.app" 200 190 --hide-extension "BiLin.app" \
+            --window-size 800 400 --app-drop-link 600 185 \
+            "BiLin-${BILIN_VERSION}-x86_64.dmg" ./flutter/build/macos/Build/Products/Release/BiLin.app
+          ls -la *.dmg
+
+      - name: Upload dmg
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bilin-macos-dmg
+          path: BiLin-*-x86_64.dmg
+          retention-days: 30

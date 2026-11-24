@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=比邻远程
+NoDisplay=true
+MimeType=x-scheme-handler/bilin;
+TryExec=bilin
+Exec=bilin %u
+Icon=bilin
+Terminal=false
+Type=Application
+StartupNotify=false
+StartupWMClass=bilin

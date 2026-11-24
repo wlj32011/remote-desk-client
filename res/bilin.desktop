@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=比邻远程
+Name[zh_CN]=比邻远程
+GenericName=远程控制
+Comment=远程控制电脑
+Exec=bilin %u
+Icon=bilin
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=Network;RemoteAccess;GTK;
+Keywords=远程;远程控制;远程桌面;remote-desktop;
+StartupWMClass=bilin

@@ -1,0 +1,143 @@
+# 比邻远程（BiLin）Linux x86_64 构建：deb 安装包（Ubuntu/Debian/统信 UOS/麒麟）。
+# 在 Ubuntu 18.04 容器里编，老 glibc，新老发行版都能装。手动触发：Actions → BiLin Linux build。
+# 产物：bilin-linux-x86_64-deb  BiLin-<版本>-x86_64.deb
+# 基于上游 .github/workflows/flutter-build.yml 的 build-rustdesk-linux（只保留 x86_64 deb）。
+name: BiLin Linux build
+
+on:
+  workflow_dispatch:
+    inputs:
+      bilin_version:
+        description: "比邻远程版本号"
+        required: false
+        default: "0.6.0"
+
+env:
+  RUST_VERSION: "1.75"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  BILIN_VERSION: "${{ inputs.bilin_version || '0.6.0' }}"
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-linux-x64:
+    needs: [generate-bridge]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Maximize build space
+        run: |
+          sudo rm -rf /opt/ghc /usr/local/lib/android /usr/share/dotnet
+          sudo apt-get update -y
+          sudo apt-get install -y nasm qemu-user-static
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set Swap Space
+        uses: pierotofy/set-swap-space@49819abfb41bd9b44fb781159c033dba90353a7c # v1.0
+        with:
+          swap-size-gb: 12
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: x86_64-unknown-linux-gnu
+          components: "rustfmt"
+
+      - name: Save Rust toolchain version
+        run: echo "RUST_TOOLCHAIN_VERSION=$(cargo --version | awk '{print $2}')" >> $GITHUB_ENV
+
+      - name: Disable rust bridge build
+        run: sed -i "s/\[\"cdylib\", \"staticlib\", \"rlib\"\]/\[\"cdylib\"\]/g" Cargo.toml
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: /opt/artifacts/vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        shell: bash
+        run: |
+          sudo apt install -y libva-dev
+          if ! $VCPKG_ROOT/vcpkg install --triplet x64-linux --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"; echo "======"; tail -80 "$_1"; echo "======"; echo ""
+            done
+            exit 1
+          fi
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - uses: rustdesk-org/run-on-arch-action@d3fcfbb632b84cf7f6bc772bfaaa2c2f4f8789a8 # 与上游同一提交
+        name: Build BiLin (Ubuntu 18.04 container)
+        with:
+          arch: x86_64
+          distro: ubuntu18.04
+          githubToken: ${{ github.token }}
+          dockerRunArgs: |
+            --volume "${PWD}:/workspace"
+            --volume "/opt/artifacts:/opt/artifacts"
+          shell: /bin/bash
+          install: |
+            apt-get update -y
+            apt-get install -y \
+               build-essential clang cmake curl gcc git g++ \
+               libayatana-appindicator3-dev libasound2-dev libclang-10-dev \
+               libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgtk-3-dev \
+               libpulse-dev libva-dev libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+               libxdo-dev libxfixes-dev llvm-10-dev nasm ninja-build pkg-config tree \
+               python3 rpm unzip wget xz-utils libssl-dev
+            apt-get remove -y libopus-dev || true
+          run: |
+            set -e
+            git config --global --add safe.directory "*"
+            pushd /opt
+            wget -q -O rust.tar.gz https://static.rust-lang.org/dist/rust-${{ env.RUST_TOOLCHAIN_VERSION }}-x86_64-unknown-linux-gnu.tar.gz
+            tar -zxf rust.tar.gz && rm rust.tar.gz
+            cd rust-${{ env.RUST_TOOLCHAIN_VERSION }}-x86_64-unknown-linux-gnu && ./install.sh > /dev/null
+            popd
+            rm -rf /opt/rust-${{ env.RUST_TOOLCHAIN_VERSION }}-x86_64-unknown-linux-gnu
+            export BILIN_VERSION=${{ env.BILIN_VERSION }}
+            export VCPKG_ROOT=/opt/artifacts/vcpkg
+            cd /workspace
+            cargo build --locked --lib --features hwcodec,flutter,unix-file-copy-paste --release
+            rm -rf target/release/deps target/release/build ~/.cargo
+            pushd /opt
+            wget -q https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_${{ env.FLUTTER_VERSION }}-stable.tar.xz
+            tar xf flutter_linux_${{ env.FLUTTER_VERSION }}-stable.tar.xz
+            popd
+            export PATH=/opt/flutter/bin:$PATH
+            pushd /opt/flutter
+            git apply /workspace/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff
+            popd
+            N=$(echo $BILIN_VERSION | awk -F. '{print $1*10000+$2*100+$3}')
+            sed -i "s/^version: .*/version: $BILIN_VERSION+$N/" flutter/pubspec.yaml
+            export CARGO_INCREMENTAL=0 DEB_ARCH=amd64
+            python3 ./build.py --flutter --skip-cargo
+            mv bilin-*.deb "BiLin-${BILIN_VERSION}-x86_64.deb"
+            ls -la *.deb
+
+      - name: Upload deb
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bilin-linux-x86_64-deb
+          path: BiLin-*-x86_64.deb
+          retention-days: 30

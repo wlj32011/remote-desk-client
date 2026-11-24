@@ -27,7 +27,7 @@ jobs:
 
   build-ios:
     needs: [generate-bridge]
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 180
     steps:
       - name: Export GitHub Actions cache environment variables
