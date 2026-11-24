@@ -3045,8 +3045,8 @@ const Map<String, String> _bilinToolbarLabels = {
   'Start session recording': '录屏',
   'Stop session recording': '停止录屏',
   'Close': '断开',
-  'Unmute': '开声音',
-  'Mute': '关声音',
+  '开声音': '开声音',
+  '关声音': '关声音',
 };
 
 /// 比邻：声音开关（默认关，点一下传对方电脑的声音）
@@ -3069,7 +3069,7 @@ class _BilinAudioButtonState extends State<_BilinAudioButton> {
       icon: Icon(muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
           color: Colors.white, size: 20)
           .paddingAll(6),
-      tooltip: muted ? 'Unmute' : 'Mute',
+      tooltip: muted ? '开声音' : '关声音',
       onPressed: () async {
         await bind.sessionToggleOption(sessionId: sid, value: 'disable-audio');
         if (mounted) setState(() {});
