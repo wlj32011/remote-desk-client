@@ -4179,6 +4179,10 @@ class FFI {
               sessionId: sessionId, arg: 'disable-audio')) {
         bind.sessionToggleOption(sessionId: sessionId, value: 'disable-audio');
       }
+      // 比邻：每次远程画面默认“适应窗口”（远程中可在工具栏“画面”里改，下次连接又回到适应窗口）
+      if (isDesktop && connType == ConnType.defaultConn) {
+        bind.sessionSetViewStyle(sessionId: sessionId, value: kRemoteViewStyleAdaptive);
+      }
     } else if (display != null) {
       if (displays == null) {
         debugPrint(
