@@ -114,6 +114,10 @@ class _InstallPageBodyState extends State<_InstallPageBody>
     if (printer.value) {
       _loadPrinterStatus();
     }
+    // 比邻：打开安装页就自动开始安装（会弹一次 Windows 管理员确认），不用用户再点
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && btnEnabled.value) install();
+    });
   }
 
   @override

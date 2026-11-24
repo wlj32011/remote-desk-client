@@ -797,6 +797,18 @@ List<TTextMenu> toolbarControls(BuildContext context, String id, FFI ffi) {
       ffi.shortcutModel.unregister(actionId);
     }
   }
+  // 比邻：电脑端“操作”菜单只留看得懂的几项
+  if (isDesktop) {
+    const keep = {
+      kShortcutActionSendCtrlAltDel,
+      kShortcutActionInsertLock,
+      kShortcutActionRestartRemote,
+      kShortcutActionToggleBlockInput,
+      kShortcutActionRefresh,
+      kShortcutActionScreenshot,
+    };
+    return v.where((e) => !e.divider && keep.contains(e.actionId)).toList();
+  }
   return v;
 }
 

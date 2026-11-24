@@ -135,6 +135,10 @@ pub fn core_main() -> Option<CoreMainAction> {
         return core_main_invoke_new_connection(std::env::args()).map(CoreMainAction::StartUi);
     }
     let click_setup = cfg!(windows) && args.is_empty() && crate::common::is_setup(&arg_exe);
+    // 比邻：双击没安装的单文件版（或比已装版本新的单文件版）直接进安装页并自动开始安装，
+    // 装好后作为系统服务运行，开机自启默认打开
+    #[cfg(windows)]
+    let click_setup = click_setup || (args.is_empty() && bilin_should_auto_install());
     if click_setup && !config::is_disable_installation() {
         args.push("--install".to_owned());
         flutter_args.push("--install".to_string());
@@ -911,4 +915,20 @@ fn parse_silent_install_args(args: &[String]) -> (Option<bool>, bool) {
 fn is_quick_support_exe(exe: &str) -> bool {
     let exe = exe.to_lowercase();
     exe.contains("-qs-") || exe.contains("-qs.exe") || exe.contains("_qs.exe")
+}
+
+#[cfg(windows)]
+fn bilin_should_auto_install() -> bool {
+    if config::is_disable_installation() {
+        return false;
+    }
+    if !crate::platform::is_installed() {
+        return true;
+    }
+    // 已装旧版、现在双击的是新版单文件：进安装页覆盖升级
+    let (_, _, _, exe) = crate::platform::windows::get_install_info();
+    let cur = std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    cur != exe.to_lowercase() && crate::ui_interface::is_installed_lower_version()
 }

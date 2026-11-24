@@ -485,7 +485,9 @@ impl RendezvousMediator {
                         continue;
                     }
                     let now = Some(Instant::now());
-                    let expired = last_register_resp.map(|x| x.elapsed().as_millis() as i64 >= REG_INTERVAL).unwrap_or(true);
+                    // 比邻：6 秒报到一次（原 15 秒），服务器 20 秒没收到就算离线，设备列表上下线更及时
+                    const BILIN_REG_INTERVAL: i64 = 6_000;
+                    let expired = last_register_resp.map(|x| x.elapsed().as_millis() as i64 >= BILIN_REG_INTERVAL).unwrap_or(true);
                     let timeout = last_register_sent.map(|x| x.elapsed().as_millis() as i64 >= reg_timeout).unwrap_or(false);
                     // temporarily disable exponential backoff for android before we add wakeup trigger to force connect in android
                     #[cfg(not(any(target_os = "android", target_os = "ios")))]

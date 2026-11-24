@@ -211,7 +211,8 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
         }
       });
     }, replace: true);
-    _timer = Timer.periodic(const Duration(seconds: 10), (_) => _queryOnline());
+    // 3 秒查一次在线状态（对方上线几秒内显示，下线约 20 秒内显示）
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) => _queryOnline());
     // 地址簿一刷新（改备注、分组等），设备对象会换新、在线状态清空，马上重新查
     _abWorker = ever(gFFI.abModel.currentAbPeers,
         (_) => Future.delayed(const Duration(milliseconds: 300), _queryOnline));

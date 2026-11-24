@@ -843,9 +843,7 @@ class _RemoteToolbarState extends State<RemoteToolbar> {
       setFullscreen: _setFullscreen,
     ));
     // Do not show keyboard for camera connection type.
-    if (widget.ffi.connType == ConnType.defaultConn) {
-      toolbarItems.add(_KeyboardMenu(id: widget.id, ffi: widget.ffi));
-    }
+    // 比邻：不放“键盘设置”（键盘模式等看不懂）
     toolbarItems.add(_ChatMenu(id: widget.id, ffi: widget.ffi));
     if (!isWeb) {
       toolbarItems.add(_VoiceCallMenu(id: widget.id, ffi: widget.ffi));
@@ -1758,6 +1756,14 @@ class _DisplayMenuState extends State<_DisplayMenu> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     menuChildrenGetter(_IconSubmenuButtonState state) {
+      // 比邻：画面菜单只留“调整窗口、缩放方式、画质”，其余（编码、分辨率、虚拟显示器、光标、隐私模式等）不显示
+      if (!isWeb) {
+        return <Widget>[
+          _screenAdjustor.adjustWindow(context),
+          viewStyle(customPercent: _customPercent),
+          imageQuality(),
+        ];
+      }
       final menuChildren = <Widget>[
         _screenAdjustor.adjustWindow(context),
         viewStyle(customPercent: _customPercent),
@@ -3022,6 +3028,39 @@ class _CloseMenu extends StatelessWidget {
   }
 }
 
+/// 比邻：工具栏按钮除了图标还显示文字
+const Map<String, String> _bilinToolbarLabels = {
+  'Pin Toolbar': '固定',
+  'Unpin Toolbar': '取消固定',
+  'Mobile Actions': '手机操作',
+  'Control Actions': '操作',
+  'Display Settings': '画面',
+  'Chat': '聊天',
+  'Text chat': '聊天',
+  'Voice call': '通话中',
+  'Waiting': '等待接听',
+  'Start session recording': '录屏',
+  'Stop session recording': '停止录屏',
+  'Close': '断开',
+};
+
+Widget _bilinWithLabel(Widget icon, String tooltip, double? width) {
+  final label = _bilinToolbarLabels[tooltip];
+  if (label == null || width != null) return icon;
+  return Padding(
+    padding: const EdgeInsets.only(right: 8),
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      icon,
+      Text(label,
+          style: const TextStyle(
+              color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+    ]),
+  );
+}
+
+double? _bilinButtonWidth(String tooltip, double? width) =>
+    width ?? (_bilinToolbarLabels.containsKey(tooltip) ? null : _ToolbarTheme.buttonSize);
+
 class _IconMenuButton extends StatefulWidget {
   final String? assetName;
   final Widget? icon;
@@ -3065,7 +3104,7 @@ class _IconMenuButtonState extends State<_IconMenuButton> {
           height: _ToolbarTheme.buttonSize,
         );
     var button = SizedBox(
-      width: widget.width ?? _ToolbarTheme.buttonSize,
+      width: _bilinButtonWidth(widget.tooltip, widget.width),
       height: _ToolbarTheme.buttonSize,
       child: MenuItemButton(
           style: ButtonStyle(
@@ -3086,7 +3125,7 @@ class _IconMenuButtonState extends State<_IconMenuButton> {
                           BorderRadius.circular(_ToolbarTheme.iconRadius),
                       color: hover ? widget.hoverColor : widget.color,
                     ),
-                    child: icon)),
+                    child: _bilinWithLabel(icon, widget.tooltip, widget.width))),
           )),
     ).marginSymmetric(
         horizontal: widget.hMargin ?? _ToolbarTheme.buttonHMargin,
@@ -3150,7 +3189,7 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
           height: _ToolbarTheme.buttonSize,
         );
     final button = SizedBox(
-        width: widget.width ?? _ToolbarTheme.buttonSize,
+        width: _bilinButtonWidth(widget.tooltip, widget.width),
         height: _ToolbarTheme.buttonSize,
         child: SubmenuButton(
             menuStyle:
@@ -3169,7 +3208,8 @@ class _IconSubmenuButtonState extends State<_IconSubmenuButton> {
                               BorderRadius.circular(_ToolbarTheme.iconRadius),
                           color: hover ? widget.hoverColor : widget.color,
                         ),
-                        child: icon))),
+                        child: _bilinWithLabel(
+                            icon, widget.tooltip, widget.width)))),
             menuChildren: widget
                 .menuChildrenGetter(this)
                 .map((e) => _buildPointerTrackWidget(e, widget.ffi))
