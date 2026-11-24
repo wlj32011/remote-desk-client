@@ -31,6 +31,8 @@ bool filterAbTagByIntersection() {
 
 /// 比邻：上次拉取个人地址簿时每个设备 ID 在服务器上有几条记录（>1 是重复，本机会自己清理掉）
 final bilinAbRowCount = <String, int>{};
+/// 比邻：个人地址簿每成功从服务器拉完一次加 1，用来确认拿到的是服务器上的最新数据而不是本地缓存
+int bilinAbFetchSeq = 0;
 
 const _personalAddressBookName = "My address book";
 const _legacyAddressBookName = "Legacy address book";
@@ -120,6 +122,7 @@ class AbModel {
   /// If `force` is `ForcePullAb.current`, the function will only pull the current address book.
   /// If `quiet` is true, the function will not display any notifications or errors.
   var _pulling = false;
+  bool get bilinPulling => _pulling;
   Future<void> pullAb(
       {required ForcePullAb? force, required bool quiet}) async {
     if (bind.isDisableAb()) return;
@@ -1493,6 +1496,7 @@ class Ab extends BaseAb {
           }
         }
       } while (current * pageSize < total);
+      if (personal) bilinAbFetchSeq++;
       return true;
     } catch (err) {
       if (!quiet) {

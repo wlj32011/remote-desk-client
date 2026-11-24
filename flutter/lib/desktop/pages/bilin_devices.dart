@@ -31,9 +31,15 @@ Future<void> bilinSyncAccountDevices() async {
   if (_syncing || !gFFI.userModel.isLogin) return;
   _syncing = true;
   try {
-    bilinAbRowCount.clear();
+    // 必须是这次真从服务器拉到的数据：别处正在拉时 pullAb 会直接返回，拿到的是本地缓存，
+    // 缓存里有本机就会误以为账号里已有本机，新电脑就一直登记不上
+    for (var i = 0; i < 60 && gFFI.abModel.bilinPulling; i++) {
+      await Future.delayed(const Duration(milliseconds: 250));
+    }
+    final seq = bilinAbFetchSeq;
     await gFFI.abModel
         .pullAb(force: ForcePullAb.listAndCurrent, quiet: true);
+    if (bilinAbFetchSeq == seq) return; // 没拉成功，等下次（每 3 分钟）再来
     final name = gFFI.abModel.personalAddressBookName();
     var ab = bilinAb();
     if (ab == null) return;
@@ -54,9 +60,12 @@ Future<void> bilinSyncAccountDevices() async {
     // 只加本机，不替别的电脑加：两台电脑同时启动互相添加会在服务器上生成重复记录，
     // 重复记录里没有密码哈希，会让免密失效（0.5.0 的问题）。每台电脑登录后自己加自己。
     final mine = ab.peers.firstWhereOrNull((p) => p.id == myId);
-    if (mine == null) {
+    if (mine == null || (bilinAbRowCount[myId] ?? 0) == 0) {
       await gFFI.abModel.addPeersTo(
           [{'id': myId, 'hostname': host, 'platform': platform}], name);
+      // 新电脑第一次登录：加完要重新拉一次，本地列表里才有自己，下面才能写上免密哈希
+      // （0.5.7 之前漏了这步，新电脑要重启比邻远程后才能免密）
+      await gFFI.abModel.pullAb(force: ForcePullAb.current, quiet: true);
       ab = bilinAb();
     } else if ((bilinAbRowCount[myId] ?? 0) > 1) {
       // 服务器上本机有重复记录：逐条删掉（服务器一次只删一条）后按合并结果重新加一条
@@ -74,6 +83,7 @@ Future<void> bilinSyncAccountDevices() async {
       }
       if (deleted) {
         await gFFI.abModel.addPeersTo([keep], name);
+        await gFFI.abModel.pullAb(force: ForcePullAb.current, quiet: true);
         ab = bilinAb();
       }
     }

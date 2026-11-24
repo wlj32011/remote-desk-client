@@ -2,6 +2,7 @@
 // 左侧导航：品牌名、远程协助、设备列表，底部设置；
 // 「远程协助」：左卡片“允许控制本机”（识别码 + 临时密码），右卡片“控制远程设备”（输入识别码 + 两个按钮），
 // 下面一排“最近连接”设备卡片；底部状态栏。只用公开 API（gFFI / bind / connect），不改 RustDesk 的连接逻辑。
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -83,6 +84,13 @@ class BilinHome extends StatefulWidget {
 }
 
 class _BilinHomeState extends State<BilinHome> {
+  Timer? _syncTimer;
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -109,6 +117,9 @@ class _BilinHomeState extends State<BilinHome> {
     });
     // 本机登记进账号（带免密哈希），同账号的电脑就能免密连本机。启动后和每次登录后都做
     Future.delayed(const Duration(seconds: 3), bilinSyncAccountDevices);
+    // 开着的时候每 3 分钟核对一次：免密哈希没登记上（刚装好服务还没起来等）就补上
+    _syncTimer = Timer.periodic(
+        const Duration(minutes: 3), (_) => bilinSyncAccountDevices());
     ever(gFFI.userModel.userName, (String name) {
       if (name.isNotEmpty) bilinSyncAccountDevices();
     });
