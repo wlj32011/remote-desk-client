@@ -2,6 +2,7 @@
 // 打开 App 后和每隔一小时查一次 https://bilin.dccjin.cn/update/android.json，
 // 有新版本就提示，点“立即更新”在 App 里下载，下载完拉起系统安装界面。
 // 安卓不允许普通 App 静默安装，最后一步需要用户点“安装”。
+// 第一次安装时系统会要求“允许来自此来源的应用”，用户去设置里打开后回到 App，会马上再提示一次。
 // 签名由系统校验：只有同一把签名钥匙打的包才能覆盖安装。
 import 'dart:async';
 import 'dart:convert';
@@ -23,11 +24,21 @@ class BilinAndroidUpdater {
   static bool _busy = false;
   // 这次打开 App 期间用户点过“以后再说”的版本，不再重复提示
   static String _dismissed = '';
+  static DateTime _lastCheck = DateTime.fromMillisecondsSinceEpoch(0);
 
   static void start() {
     if (!Platform.isAndroid || _timer != null) return;
     Future.delayed(const Duration(seconds: 8), check);
     _timer = Timer.periodic(const Duration(hours: 1), (_) => check());
+    // 回到前台时也查（比如刚在设置里允许了安装、或者装到一半取消了）
+    WidgetsBinding.instance.addObserver(_ResumeObserver());
+  }
+
+  static void _onResume() {
+    if (DateTime.now().difference(_lastCheck) < const Duration(seconds: 30)) {
+      return;
+    }
+    Future.delayed(const Duration(seconds: 2), check);
   }
 
   static List<int> _ver(String v) =>
@@ -50,6 +61,7 @@ class BilinAndroidUpdater {
     }
     if (gFFI.serverModel.clients.isNotEmpty) return;
     _busy = true;
+    _lastCheck = DateTime.now();
     try {
       final cur = await bind.mainGetVersion();
       if (cur.isEmpty || cur == '0.0.0') return;
@@ -98,6 +110,13 @@ class BilinAndroidUpdater {
 
   static Future<void> _downloadAndInstall(
       String ver, String url, int size) async {
+    final dir =
+        Directory('${(await getTemporaryDirectory()).path}/bilin_update');
+    final cached = File('${dir.path}/${url.substring(_prefix.length)}');
+    if (size > 0 && await cached.exists() && await cached.length() == size) {
+      await _install(cached, url);
+      return;
+    }
     final ctx = globalKey.currentContext;
     if (ctx == null) return;
     final progress = ValueNotifier<double>(0);
@@ -132,10 +151,9 @@ class BilinAndroidUpdater {
     );
     File? file;
     try {
-      final dir = Directory('${(await getTemporaryDirectory()).path}/bilin_update');
       if (await dir.exists()) await dir.delete(recursive: true);
       await dir.create(recursive: true);
-      file = File('${dir.path}/${url.substring(_prefix.length)}');
+      file = cached;
       final resp = await client.send(http.Request('GET', Uri.parse(url)));
       if (resp.statusCode != 200) throw '下载失败（${resp.statusCode}）';
       final total = size > 0 ? size : (resp.contentLength ?? 0);
@@ -163,6 +181,10 @@ class BilinAndroidUpdater {
     if (cancelled) return;
     final c = globalKey.currentContext;
     if (c != null) Navigator.of(c).pop();
+    await _install(file, url);
+  }
+
+  static Future<void> _install(File file, String url) async {
     bool started = false;
     try {
       started = await _channel.invokeMethod('bilin_install_apk', file.path) == true;
@@ -173,5 +195,12 @@ class BilinAndroidUpdater {
       // 老系统（安卓 7 以下）App 内安装不了，交给浏览器下载
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     }
+  }
+}
+
+class _ResumeObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) BilinAndroidUpdater._onResume();
   }
 }
