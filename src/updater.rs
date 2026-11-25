@@ -195,10 +195,10 @@ fn start_auto_update_check_(rx_msg: Receiver<UpdateMsg>) {
 const BILIN_UPDATE_JSON: &str = "https://bilin.dccjin.cn/update/latest.json";
 #[cfg(target_os = "windows")]
 const BILIN_UPDATE_PREFIX: &str = "https://bilin.dccjin.cn/update/";
-#[cfg(target_os = "windows")]
+#[allow(dead_code)]
 const BILIN_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
-#[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn bilin_version_tuple(v: &str) -> Vec<u32> {
     v.trim()
         .split('.')
@@ -543,7 +543,7 @@ pub fn start_auto_update_macos() {
             log::info!("[root-update] Auto-update scheduler thread started.");
             std::thread::sleep(INITIAL_CHECK_DELAY);
             wait_for_failed_update_retry();
-            let mut interval = DUR_ONE_DAY;
+            let mut interval = BILIN_CHECK_INTERVAL;
             loop {
                 log::info!("[root-update] Running scheduled update check...");
                 let no_active_conns = has_no_active_conns_ipc();
@@ -559,7 +559,7 @@ pub fn start_auto_update_macos() {
                                 // failure interval until the new daemon replaces us.
                                 interval = RETRY_INTERVAL;
                             } else {
-                                interval = DUR_ONE_DAY;
+                                interval = BILIN_CHECK_INTERVAL;
                             }
                         }
                         Err(e) => {
@@ -577,8 +577,11 @@ pub fn start_auto_update_macos() {
 }
 
 #[cfg(target_os = "macos")]
+#[allow(unreachable_code)]
 pub fn check_update_as_root() -> ResultType<bool> {
     let _update_lock = acquire_mac_update_lock()?;
+    // 比邻：不走原版升级服务器，改用 https://bilin.dccjin.cn/update/mac.json
+    return bilin_check_update_as_root();
     // Allow-auto-update setting
     if !config::Config::get_bool_option(keys::OPTION_ALLOW_AUTO_UPDATE) {
         log::info!("[root-update] Auto update is disabled, skipping.");
@@ -698,4 +701,285 @@ pub fn check_update_as_root() -> ResultType<bool> {
         );
     }
     result.map(|_| true)
+}
+
+
+// ===================== 比邻：Mac / Linux 自动升级 =====================
+// 服务器上每个平台一个 json（version/url/size/sha256），比本机新就下载、校验后静默升级。
+// Mac：root 服务（LaunchDaemon）下载 dmg，复用原版的 update_from_dmg_as_root 替换 /Applications/BiLin.app。
+// Linux：root 服务（systemd bilin.service）下载 deb，用 systemd-run 在服务外面跑 dpkg -i，
+//        这样 deb 的 prerm 停掉 bilin 服务时安装进程不会被一起杀掉。
+
+#[cfg(target_os = "macos")]
+const BILIN_PLATFORM_JSON: &str = "https://bilin.dccjin.cn/update/mac.json";
+#[cfg(target_os = "macos")]
+const BILIN_PLATFORM_EXT: &str = ".dmg";
+#[cfg(target_os = "linux")]
+const BILIN_PLATFORM_JSON: &str = "https://bilin.dccjin.cn/update/linux.json";
+#[cfg(target_os = "linux")]
+const BILIN_PLATFORM_EXT: &str = ".deb";
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const BILIN_DOWNLOAD_PREFIX: &str = "https://bilin.dccjin.cn/update/";
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+struct BilinRelease {
+    version: String,
+    url: String,
+    file_name: String,
+    size: u64,
+    sha256: String,
+}
+
+/// 取服务器上的最新版本；没有更新返回 None
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn bilin_fetch_release() -> ResultType<Option<BilinRelease>> {
+    if crate::BILIN_VERSION == "0.0.0" {
+        // 本地开发版没带版本号，不升级
+        return Ok(None);
+    }
+    let client = crate::hbbs_http::create_http_client_with_url_strict(BILIN_PLATFORM_JSON)?;
+    let resp = client.get(BILIN_PLATFORM_JSON).send()?;
+    if !resp.status().is_success() {
+        bail!("bilin update: {} {}", BILIN_PLATFORM_JSON, resp.status());
+    }
+    let v: serde_json::Value = serde_json::from_str(&resp.text()?)?;
+    let version = v["version"].as_str().unwrap_or_default().trim().to_owned();
+    let url = v["url"].as_str().unwrap_or_default().to_owned();
+    let sha256 = v["sha256"].as_str().unwrap_or_default().to_lowercase();
+    let size = v["size"].as_u64().unwrap_or(0);
+    if version.is_empty()
+        || bilin_version_tuple(&version) <= bilin_version_tuple(crate::BILIN_VERSION)
+    {
+        log::debug!(
+            "bilin update: no newer version ({} vs {})",
+            version,
+            crate::BILIN_VERSION
+        );
+        return Ok(None);
+    }
+    let file_name = url
+        .strip_prefix(BILIN_DOWNLOAD_PREFIX)
+        .unwrap_or_default()
+        .to_owned();
+    if file_name.is_empty()
+        || !file_name.ends_with(BILIN_PLATFORM_EXT)
+        || !file_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        || sha256.len() != 64
+        || !sha256.chars().all(|c| c.is_ascii_hexdigit())
+        || size == 0
+        || !version.chars().all(|c| c.is_ascii_digit() || c == '.')
+    {
+        bail!("bilin update: bad {}", BILIN_PLATFORM_JSON);
+    }
+    log::info!(
+        "bilin update: new version {} -> {}",
+        crate::BILIN_VERSION,
+        version
+    );
+    Ok(Some(BilinRelease {
+        version,
+        url,
+        file_name,
+        size,
+        sha256,
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn bilin_check_update_as_root() -> ResultType<bool> {
+    let Some(r) = bilin_fetch_release()? else {
+        return Ok(false);
+    };
+    let out = std::process::Command::new("/usr/bin/mktemp")
+        .args(["-d", "/tmp/.bilindownload-XXXXXX"])
+        .output()?;
+    if !out.status.success() {
+        bail!("[root-update] mktemp failed");
+    }
+    let private_tmp = String::from_utf8(out.stdout)
+        .map_err(|e| hbb_common::anyhow::anyhow!("[root-update] mktemp output: {}", e))?
+        .trim()
+        .to_owned();
+    if private_tmp.is_empty() {
+        bail!("[root-update] mktemp returned empty path");
+    }
+    std::fs::set_permissions(&private_tmp, std::fs::Permissions::from_mode(0o700))?;
+    let file_path = Path::new(&private_tmp).join(&r.file_name);
+    let result = (|| -> ResultType<bool> {
+        ensure_verified_update_artifact(&r.url, &file_path, r.size, &r.sha256)?;
+        if !has_no_active_conns_ipc() {
+            bail!("[root-update] Active session started during download, deferring update.");
+        }
+        crate::platform::update_from_dmg_as_root(&file_path.to_string_lossy(), &r.version)?;
+        Ok(true)
+    })();
+    if let Err(e) = std::fs::remove_dir_all(&private_tmp) {
+        log::warn!("[root-update] Failed to remove temp dir {}: {}", private_tmp, e);
+    }
+    result
+}
+
+/// Linux：只升级用 deb 装在 /usr/share/bilin 的正式版（开发版、别的打包方式都跳过）
+#[cfg(target_os = "linux")]
+fn bilin_linux_installed_by_deb() -> bool {
+    if !cfg!(target_arch = "x86_64") {
+        return false;
+    }
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|p| std::fs::canonicalize(p).ok());
+    if exe.as_deref() != Some(Path::new("/usr/share/bilin/bilin")) {
+        return false;
+    }
+    std::process::Command::new("dpkg-query")
+        .args(["-W", "-f=${Status}", "bilin"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains("install ok installed"))
+        .unwrap_or(false)
+}
+
+/// Linux：问 root 和各登录用户的 --server 进程现在有没有远程连接（被控和主控都算）
+#[cfg(target_os = "linux")]
+fn bilin_linux_no_active_conns() -> bool {
+    let rt = match hbb_common::tokio::runtime::Runtime::new() {
+        Ok(rt) => rt,
+        Err(e) => {
+            log::warn!("bilin update: runtime: {}", e);
+            return false;
+        }
+    };
+    rt.block_on(async {
+        let mut uids = vec![0u32];
+        if let Ok(rd) = std::fs::read_dir("/run/user") {
+            for e in rd.flatten() {
+                if let Ok(uid) = e.file_name().to_string_lossy().parse::<u32>() {
+                    if uid != 0 {
+                        uids.push(uid);
+                    }
+                }
+            }
+        }
+        for uid in uids {
+            let path = config::Config::ipc_path_for_uid(uid, "");
+            if !Path::new(&path).exists() {
+                continue;
+            }
+            // 连不上说明这个用户没有在跑的 --server，跳过
+            let Ok(mut conn) = crate::ipc::connect_for_uid(1000, uid, "").await else {
+                continue;
+            };
+            if conn
+                .send(&crate::ipc::Data::HasNoActiveConns(None))
+                .await
+                .is_err()
+            {
+                return false;
+            }
+            match conn.next_timeout(1000).await {
+                Ok(Some(crate::ipc::Data::HasNoActiveConns(Some(true)))) => {}
+                _ => return false,
+            }
+        }
+        true
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn bilin_linux_update_once() -> ResultType<bool> {
+    use std::os::unix::fs::PermissionsExt;
+    if !bilin_linux_installed_by_deb() {
+        return Ok(false);
+    }
+    let Some(r) = bilin_fetch_release()? else {
+        return Ok(false);
+    };
+    if !r.file_name.contains("x86_64") {
+        bail!("bilin update: not an x86_64 package: {}", r.file_name);
+    }
+    if !bilin_linux_no_active_conns() {
+        bail!("bilin update: active session, deferring");
+    }
+    let dir = Path::new("/var/cache/bilin-update");
+    if let Ok(m) = std::fs::symlink_metadata(dir) {
+        if !m.file_type().is_dir() {
+            std::fs::remove_file(dir)?;
+        }
+    }
+    std::fs::create_dir_all(dir)?;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    // 清掉以前下载的旧包
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            if e.file_name().to_string_lossy() != r.file_name.as_str() {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let file_path = dir.join(&r.file_name);
+    ensure_verified_update_artifact(&r.url, &file_path, r.size, &r.sha256)?;
+    let file = file_path.to_string_lossy().to_string();
+    // 包里写的版本必须和 json 一致，否则装完版本号对不上会每小时重复装
+    let out = std::process::Command::new("dpkg-deb")
+        .args(["-f", &file, "Package", "Version"])
+        .output()?;
+    let fields = String::from_utf8_lossy(&out.stdout).to_string();
+    if !fields.contains("Package: bilin") || !fields.contains(&format!("Version: {}", r.version)) {
+        let _ = std::fs::remove_file(&file_path);
+        bail!("bilin update: package fields mismatch: {}", fields.trim());
+    }
+    if !bilin_linux_no_active_conns() {
+        bail!("bilin update: active session started during download, deferring");
+    }
+    let systemd_run = ["/usr/bin/systemd-run", "/bin/systemd-run"]
+        .into_iter()
+        .find(|p| Path::new(p).exists());
+    let Some(systemd_run) = systemd_run else {
+        bail!("bilin update: systemd-run not found");
+    };
+    let unit = format!(
+        "bilin-update-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    );
+    let script = format!(
+        "export DEBIAN_FRONTEND=noninteractive; dpkg -i '{f}' >/var/log/bilin-update.log 2>&1; rc=$?; rm -f '{f}'; exit $rc",
+        f = file
+    );
+    log::info!("bilin update: installing {} via {}", file, unit);
+    let status = std::process::Command::new(systemd_run)
+        .args(["--unit", &unit, "--collect", "--quiet", "/bin/sh", "-c", &script])
+        .status()?;
+    if !status.success() {
+        bail!("bilin update: systemd-run failed: {}", status);
+    }
+    Ok(true)
+}
+
+/// Linux root 服务启动时调用：开机 1 分钟后查一次，之后每小时查一次
+#[cfg(target_os = "linux")]
+pub fn start_auto_update_linux() {
+    let r = std::thread::Builder::new()
+        .name("bilin-auto-update".to_owned())
+        .spawn(|| {
+            std::thread::sleep(Duration::from_secs(60));
+            loop {
+                let interval = match bilin_linux_update_once() {
+                    // 安装已开始，服务马上会被新版本替换
+                    Ok(true) => RETRY_INTERVAL,
+                    Ok(false) => BILIN_CHECK_INTERVAL,
+                    Err(e) => {
+                        log::warn!("bilin update: {}", e);
+                        RETRY_INTERVAL
+                    }
+                };
+                std::thread::sleep(interval);
+            }
+        });
+    if let Err(e) = r {
+        log::error!("bilin update: failed to start thread: {}", e);
+    }
 }

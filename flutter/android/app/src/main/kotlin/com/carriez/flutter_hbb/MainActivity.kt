@@ -32,6 +32,7 @@ import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import android.util.DisplayMetrics
 import androidx.annotation.RequiresApi
+import androidx.core.content.FileProvider
 import org.json.JSONArray
 import org.json.JSONObject
 import com.hjq.permissions.XXPermissions
@@ -290,6 +291,29 @@ class MainActivity : FlutterActivity() {
             if (documentPicker.handle(call, result)) return@setMethodCallHandler
             // make sure result will be invoked, otherwise flutter will await forever
             when (call.method) {
+                // 比邻：自动升级，拉起系统安装界面；安卓 7 以下返回 false，由 Dart 交给浏览器
+                "bilin_install_apk" -> {
+                    try {
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+                            result.success(false)
+                        } else {
+                            val f = File(call.arguments as String)
+                            val uri = FileProvider.getUriForFile(
+                                this@MainActivity, "$packageName.bilinupdate", f
+                            )
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, "application/vnd.android.package-archive")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(logTag, "bilin_install_apk: $e")
+                        result.success(false)
+                    }
+                }
                 "init_service" -> {
                     Intent(activity, MainService::class.java).also {
                         bindService(it, serviceConnection, Context.BIND_AUTO_CREATE)

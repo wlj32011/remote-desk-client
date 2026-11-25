@@ -8,6 +8,7 @@ import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/bilin_devices.dart';
 import 'package:flutter_hbb/desktop/pages/bilin_home.dart';
+import 'package:flutter_hbb/mobile/pages/bilin_update.dart';
 import 'package:flutter_hbb/mobile/pages/home_page.dart';
 import 'package:flutter_hbb/models/ab_model.dart';
 import 'package:flutter_hbb/models/peer_model.dart';
@@ -61,6 +62,8 @@ class _BilinMobileRemotePageState extends State<BilinMobileRemotePage> {
       if ('$v'.isNotEmpty) _refresh();
     });
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _queryOnline());
+    // 安卓自动升级：打开后查一次，之后每小时查一次
+    BilinAndroidUpdater.start();
   }
 
   @override

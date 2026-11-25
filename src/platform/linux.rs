@@ -1234,6 +1234,8 @@ pub fn start_os_service() {
     std::thread::spawn(|| {
         allow_err!(crate::ipc::start(crate::POSTFIX_SERVICE));
     });
+    // 比邻：Linux 自动升级（只对 deb 正式安装生效）
+    crate::updater::start_auto_update_linux();
 
     // DRM/KMS capture producer (opt-in `drm` feature): a dedicated thread + runtime that streams
     // scanout frames to the user `--server` over the `_drm` service-scoped channel. Runs here
