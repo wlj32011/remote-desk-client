@@ -957,33 +957,141 @@ class _LoginDialog extends StatefulWidget {
   State<_LoginDialog> createState() => _LoginDialogState();
 }
 
+/// 比邻：手机号账号。登录默认用密码，也可以切到验证码登录；注册要验证码并设置密码；
+/// 忘记密码用验证码重设。后台接口在 /api/bilin/*（返回格式同 /api/login）。
+enum _BilinAuthPage { login, register, reset }
+
+const _kBilinLastPhone = 'bilin-last-phone';
+
 class _LoginDialogState extends State<_LoginDialog> {
-  bool _register = false;
+  _BilinAuthPage _page = _BilinAuthPage.login;
+  bool _bySms = false;
   bool _busy = false;
+  bool _sending = false;
+  bool _showPwd = false;
+  int _countdown = 0;
+  Timer? _timer;
   String _error = '';
   String _mode = bilinMode.value;
-  final _user = TextEditingController();
+  final _phone = TextEditingController();
   final _pwd = TextEditingController();
   final _pwd2 = TextEditingController();
+  final _code = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _phone.text = bind.mainGetLocalOption(key: _kBilinLastPhone);
+  }
 
   @override
   void dispose() {
-    _user.dispose();
+    _timer?.cancel();
+    _phone.dispose();
     _pwd.dispose();
     _pwd2.dispose();
+    _code.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    final user = _user.text.trim();
-    final pwd = _pwd.text;
-    if (user.isEmpty || pwd.isEmpty) {
-      setState(() => _error = '请输入账号和密码');
+  bool get _needCode => _page != _BilinAuthPage.login || _bySms;
+  bool get _needPwd => _page != _BilinAuthPage.login || !_bySms;
+  bool get _needPwd2 => _page != _BilinAuthPage.login;
+
+  String get _purpose => switch (_page) {
+        _BilinAuthPage.register => 'register',
+        _BilinAuthPage.reset => 'reset',
+        _BilinAuthPage.login => 'login',
+      };
+
+  static bool _validPhone(String p) => RegExp(r'^1[3-9]\d{9}$').hasMatch(p);
+
+  void _go(_BilinAuthPage page, {bool? bySms}) {
+    setState(() {
+      _page = page;
+      if (bySms != null) _bySms = bySms;
+      _error = '';
+      _code.clear();
+      _pwd.clear();
+      _pwd2.clear();
+    });
+  }
+
+  Future<Map<String, dynamic>> _post(String path, Map<String, dynamic> body) async {
+    final api = await bind.mainGetApiServer();
+    final http.Response resp;
+    try {
+      resp = await http
+          .post(Uri.parse('$api/api/bilin/$path'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(body))
+          .timeout(const Duration(seconds: 15));
+    } catch (_) {
+      throw Exception('连不上服务器，请检查网络');
+    }
+    dynamic data;
+    try {
+      data = jsonDecode(decode_http_response(resp));
+    } catch (_) {
+      throw Exception('服务器返回出错（${resp.statusCode}），请稍后再试');
+    }
+    if (data is! Map<String, dynamic>) {
+      throw Exception('服务器返回出错，请稍后再试');
+    }
+    if (resp.statusCode != 200 || data['error'] != null) {
+      throw Exception('${data['error'] ?? '请求失败（${resp.statusCode}）'}');
+    }
+    return data;
+  }
+
+  Future<void> _sendCode() async {
+    final phone = _phone.text.trim();
+    if (!_validPhone(phone)) {
+      setState(() => _error = '请输入正确的 11 位手机号');
       return;
     }
-    if (_register) {
-      if (pwd.length < 6) {
-        setState(() => _error = '密码至少 6 位');
+    setState(() {
+      _sending = true;
+      _error = '';
+    });
+    try {
+      await _post('sms-code', {'phone': phone, 'purpose': _purpose});
+      showToast('验证码已发送');
+      _countdown = 60;
+      _timer?.cancel();
+      _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) return t.cancel();
+        setState(() => _countdown--);
+        if (_countdown <= 0) t.cancel();
+      });
+    } catch (e) {
+      setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _submit() async {
+    final phone = _phone.text.trim();
+    final pwd = _pwd.text;
+    final code = _code.text.trim();
+    final pwdLogin = _page == _BilinAuthPage.login && !_bySms;
+    // 密码登录也允许老的用户名账号，其它情况必须是手机号
+    if (pwdLogin ? phone.isEmpty : !_validPhone(phone)) {
+      setState(() => _error = '请输入正确的 11 位手机号');
+      return;
+    }
+    if (_needCode && code.length != 6) {
+      setState(() => _error = '请输入 6 位验证码');
+      return;
+    }
+    if (_needPwd && pwd.isEmpty) {
+      setState(() => _error = '请输入密码');
+      return;
+    }
+    if (_needPwd2) {
+      if (pwd.length < 6 || pwd.length > 32) {
+        setState(() => _error = '密码要 6～32 位');
         return;
       }
       if (pwd != _pwd2.text) {
@@ -996,47 +1104,43 @@ class _LoginDialogState extends State<_LoginDialog> {
       _error = '';
     });
     try {
-      if (_register) {
-        final api = await bind.mainGetApiServer();
-        final resp = await http.post(
-          Uri.parse('$api/api/admin/user/register'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'username': user,
-            'password': pwd,
-            'confirm_password': pwd,
-          }),
-        );
-        final body = jsonDecode(decode_http_response(resp));
-        if (body is! Map || body['code'] != 0) {
-          final msg = body is Map ? (body['message'] ?? '') : '';
-          throw Exception(msg == '操作失败。' ? '这个账号已被注册，换一个试试' : '注册失败：$msg');
-        }
-      }
-      final resp = await gFFI.userModel.login(LoginRequest(
-          username: user,
-          password: pwd,
-          id: await bind.mainGetMyId(),
-          uuid: await bind.mainGetUuid(),
-          autoLogin: true,
-          type: HttpType.kAuthReqTypeAccount));
+      Map<String, dynamic> deviceInfo = {};
+      try {
+        deviceInfo = jsonDecode(bind.mainGetLoginDeviceInfo());
+      } catch (_) {}
+      final body = <String, dynamic>{
+        'phone': phone,
+        'id': await bind.mainGetMyId(),
+        'uuid': await bind.mainGetUuid(),
+        'deviceInfo': deviceInfo,
+        if (_needCode) 'code': code,
+        if (_needPwd) 'password': pwd,
+      };
+      final path = switch (_page) {
+        _BilinAuthPage.register => 'register',
+        _BilinAuthPage.reset => 'reset-pwd',
+        _BilinAuthPage.login => _bySms ? 'login-sms' : 'login-pwd',
+      };
+      final data = await _post(path, body);
+      final resp = gFFI.userModel.getLoginResponseFromAuthBody(data);
       if (resp.type == HttpType.kAuthResTypeToken &&
           resp.access_token != null) {
         await bind.mainSetLocalOption(
             key: 'access_token', value: resp.access_token!);
         await bind.mainSetLocalOption(
             key: 'user_info', value: jsonEncode(resp.user ?? {}));
+        await bind.mainSetLocalOption(key: _kBilinLastPhone, value: phone);
         await bilinSetMode(_mode);
         gFFI.groupModel.pull(force: true, quiet: true);
         if (mounted) Navigator.of(context).pop();
-        showToast(_register ? '注册成功，已登录' : '登录成功');
+        showToast(switch (_page) {
+          _BilinAuthPage.register => '注册成功，已登录',
+          _BilinAuthPage.reset => '密码已重设，已登录',
+          _BilinAuthPage.login => '登录成功',
+        });
         return;
       }
       setState(() => _error = '登录失败，请稍后再试');
-    } on RequestException catch (e) {
-      setState(() => _error = e.cause.contains('密码') || e.cause.isEmpty
-          ? '账号或密码不对'
-          : e.cause);
     } catch (e) {
       setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -1044,9 +1148,11 @@ class _LoginDialogState extends State<_LoginDialog> {
     }
   }
 
-  InputDecoration _deco(String hint, IconData icon) => InputDecoration(
+  InputDecoration _deco(String hint, IconData icon, {Widget? suffix}) =>
+      InputDecoration(
         hintText: hint,
         prefixIcon: Icon(icon, size: 20),
+        suffixIcon: suffix,
         filled: true,
         fillColor: BilinColors.field(context),
         contentPadding: const EdgeInsets.symmetric(vertical: 14),
@@ -1094,8 +1200,87 @@ class _LoginDialogState extends State<_LoginDialog> {
     );
   }
 
+  Widget _tab(String label, bool sms) {
+    final selected = _bySms == sms;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: _busy || selected ? null : () => _go(_BilinAuthPage.login, bySms: sms),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(2, 4, 2, 0),
+        child: Column(children: [
+          Text(label,
+              style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+                  color: selected ? BilinColors.text(context) : BilinColors.sub(context))),
+          const SizedBox(height: 6),
+          Container(
+              width: 28,
+              height: 3,
+              decoration: BoxDecoration(
+                  color: selected ? BilinColors.brand : Colors.transparent,
+                  borderRadius: BorderRadius.circular(2))),
+        ]),
+      ),
+    );
+  }
+
+  Widget _codeRow() {
+    final canSend = !_sending && _countdown <= 0 && !_busy;
+    return Row(children: [
+      Expanded(
+        child: TextField(
+          controller: _code,
+          keyboardType: TextInputType.number,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(6),
+          ],
+          onSubmitted: (_) => _needPwd ? null : _submit(),
+          decoration: _deco('验证码', Icons.sms_outlined),
+        ),
+      ),
+      const SizedBox(width: 10),
+      SizedBox(
+        height: 48,
+        width: 116,
+        child: OutlinedButton(
+          onPressed: canSend ? _sendCode : null,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: BilinColors.brand,
+            side: BorderSide(
+                color: canSend ? BilinColors.brand : BilinColors.border(context)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          child: _sending
+              ? const SizedBox(
+                  width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : Text(_countdown > 0 ? '$_countdown 秒后重发' : '获取验证码',
+                  style: const TextStyle(fontSize: 14)),
+        ),
+      ),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isLogin = _page == _BilinAuthPage.login;
+    final title = switch (_page) {
+      _BilinAuthPage.register => '注册比邻远程账号',
+      _BilinAuthPage.reset => '重设密码',
+      _BilinAuthPage.login => '登录比邻远程',
+    };
+    final pwdHint = switch (_page) {
+      _BilinAuthPage.register => '设置密码（6～32 位）',
+      _BilinAuthPage.reset => '新密码（6～32 位）',
+      _BilinAuthPage.login => '密码',
+    };
+    final eye = IconButton(
+      tooltip: _showPwd ? '隐藏密码' : '显示密码',
+      icon: Icon(_showPwd ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+          size: 20),
+      onPressed: () => setState(() => _showPwd = !_showPwd),
+    );
     return Dialog(
       backgroundColor: BilinColors.card(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
@@ -1113,44 +1298,72 @@ class _LoginDialogState extends State<_LoginDialog> {
                   child: Image.asset('assets/icon.png', width: 30, height: 30),
                 ),
                 const SizedBox(width: 10),
-                Text(_register ? '注册比邻远程账号' : '登录比邻远程',
+                Text(title,
                     style: TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
                         color: BilinColors.text(context))),
               ]),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
+              if (isLogin) ...[
+                Row(children: [
+                  _tab('密码登录', false),
+                  const SizedBox(width: 22),
+                  _tab('验证码登录', true),
+                ]),
+                const SizedBox(height: 14),
+              ],
               TextField(
-                controller: _user,
-                autofocus: true,
-                decoration: _deco('账号（手机号或用户名）', Icons.person_outline),
+                controller: _phone,
+                autofocus: _phone.text.isEmpty,
+                keyboardType: isLogin && !_bySms ? TextInputType.text : TextInputType.phone,
+                inputFormatters: [LengthLimitingTextInputFormatter(32)],
+                decoration: _deco('手机号', Icons.phone_iphone_outlined),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _pwd,
-                obscureText: true,
-                onSubmitted: (_) => _register ? null : _submit(),
-                decoration: _deco('密码', Icons.lock_outline),
-              ),
-              if (_register) ...[
+              if (_needCode) ...[
+                const SizedBox(height: 12),
+                _codeRow(),
+              ],
+              if (_needPwd) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _pwd,
+                  autofocus: isLogin && _phone.text.isNotEmpty,
+                  obscureText: !_showPwd,
+                  inputFormatters: [LengthLimitingTextInputFormatter(32)],
+                  onSubmitted: (_) => _needPwd2 ? null : _submit(),
+                  decoration: _deco(pwdHint, Icons.lock_outline, suffix: eye),
+                ),
+              ],
+              if (_needPwd2) ...[
                 const SizedBox(height: 12),
                 TextField(
                   controller: _pwd2,
-                  obscureText: true,
+                  obscureText: !_showPwd,
+                  inputFormatters: [LengthLimitingTextInputFormatter(32)],
                   onSubmitted: (_) => _submit(),
                   decoration: _deco('再输一次密码', Icons.lock_outline),
                 ),
               ],
+              if (isLogin && !_bySms)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _busy ? null : () => _go(_BilinAuthPage.reset),
+                    child: Text('忘记密码？',
+                        style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
+                  ),
+                ),
               if (!isMobile) ...[
-              const SizedBox(height: 18),
-              Text('这台电脑的使用方式',
-                  style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
-              const SizedBox(height: 8),
-              Row(children: [
-                _modeOption('both', '主控 + 被控', '能控制别人，也能被控制'),
-                const SizedBox(width: 10),
-                _modeOption('incoming', '仅被控', '只让别人控制这台电脑'),
-              ]),
+                SizedBox(height: isLogin && !_bySms ? 4 : 18),
+                Text('这台电脑的使用方式',
+                    style: TextStyle(fontSize: 13, color: BilinColors.sub(context))),
+                const SizedBox(height: 8),
+                Row(children: [
+                  _modeOption('both', '主控 + 被控', '能控制别人，也能被控制'),
+                  const SizedBox(width: 10),
+                  _modeOption('incoming', '仅被控', '只让别人控制这台电脑'),
+                ]),
               ],
               if (_error.isNotEmpty) ...[
                 const SizedBox(height: 12),
@@ -1175,7 +1388,12 @@ class _LoginDialogState extends State<_LoginDialog> {
                           height: 20,
                           child: CircularProgressIndicator(
                               strokeWidth: 2, color: Colors.white))
-                      : Text(_register ? '注册并登录' : '登录',
+                      : Text(
+                          switch (_page) {
+                            _BilinAuthPage.register => '注册并登录',
+                            _BilinAuthPage.reset => '重设密码并登录',
+                            _BilinAuthPage.login => '登录',
+                          },
                           style: const TextStyle(
                               fontSize: 16, fontWeight: FontWeight.w600)),
                 ),
@@ -1184,11 +1402,9 @@ class _LoginDialogState extends State<_LoginDialog> {
               TextButton(
                 onPressed: _busy
                     ? null
-                    : () => setState(() {
-                          _register = !_register;
-                          _error = '';
-                        }),
-                child: Text(_register ? '已有账号？去登录' : '没有账号？免费注册',
+                    : () => _go(isLogin ? _BilinAuthPage.register : _BilinAuthPage.login,
+                        bySms: false),
+                child: Text(isLogin ? '没有账号？用手机号注册' : '已有账号？去登录',
                     style: const TextStyle(color: BilinColors.brand)),
               ),
             ],
