@@ -3,6 +3,7 @@
 // 「远程协助」：左卡片“允许控制本机”（识别码 + 临时密码），右卡片“控制远程设备”（输入识别码 + 两个按钮），
 // 下面一排“最近连接”设备卡片；底部状态栏。只用公开 API（gFFI / bind / connect），不改 RustDesk 的连接逻辑。
 import 'dart:async';
+import 'package:window_manager/window_manager.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -85,11 +86,28 @@ class BilinHome extends StatefulWidget {
 
 class _BilinHomeState extends State<BilinHome> {
   Timer? _syncTimer;
+  Timer? _incomingTimer;
+  int _incoming = 0;
 
   @override
   void dispose() {
     _syncTimer?.cancel();
+    _incomingTimer?.cancel();
     super.dispose();
+  }
+
+  // 本机从“没人连”变成“有人在远程”时，把主界面收到托盘（右下角图标还能再打开）
+  Future<void> _checkIncoming() async {
+    int n = 0;
+    try {
+      n = int.tryParse(await bind.mainGetCommon(key: 'bilin-controlled-count')) ?? 0;
+    } catch (_) {}
+    if (n > 0 && _incoming == 0) {
+      try {
+        if (await windowManager.isVisible()) await windowManager.hide();
+      } catch (_) {}
+    }
+    _incoming = n;
   }
 
   @override
@@ -115,6 +133,10 @@ class _BilinHomeState extends State<BilinHome> {
         }
       } catch (_) {}
     });
+    if (isWindows || isLinux || isMacOS) {
+      _incomingTimer =
+          Timer.periodic(const Duration(seconds: 2), (_) => _checkIncoming());
+    }
     // 本机登记进账号（带免密哈希），同账号的电脑就能免密连本机。启动后和每次登录后都做
     Future.delayed(const Duration(seconds: 3), bilinSyncAccountDevices);
     // 开着的时候每 3 分钟核对一次：免密哈希没登记上（刚装好服务还没起来等）就补上

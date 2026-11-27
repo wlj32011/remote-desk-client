@@ -3647,6 +3647,84 @@ mod tests {
 /// bilin: 本机固定密码的哈希（sha256(密码+盐)，base64），写进账号的个人地址簿，
 /// 同账号的其他电脑从设备列表连本机时自动用它登录，不用输密码。
 /// 本机没有固定密码时自动生成一个随机强密码（用户不用知道，想改随时可在“设置-安全”改）。
+/// 比邻：批量关机。Windows 上 ExitWindowsEx(EWX_SHUTDOWN) 在部分电脑只关到“可以断电”不真正断电，
+/// 先用系统自带 shutdown.exe（/s 关机 /f 强制关程序 /t 0 立即），失败再退回 API；Linux 用 systemctl poweroff。
+#[cfg(windows)]
+fn bilin_shutdown_exe(args: &[&str]) -> bool {
+    use std::os::windows::process::CommandExt;
+    let exe = std::env::var("SystemRoot")
+        .map(|r| format!("{}\\System32\\shutdown.exe", r))
+        .unwrap_or_else(|_| "C:\\Windows\\System32\\shutdown.exe".to_owned());
+    match std::process::Command::new(&exe)
+        .args(args)
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .status()
+    {
+        Ok(s) if s.success() => {
+            log::info!("bilin: shutdown.exe {:?} ok", args);
+            true
+        }
+        r => {
+            log::warn!("bilin: shutdown.exe {:?} failed: {:?}", args, r);
+            false
+        }
+    }
+}
+
+/// 比邻：远程重启（Windows），成功返回 true
+#[cfg(windows)]
+pub fn bilin_power_restart() -> bool {
+    bilin_shutdown_exe(&["/r", "/f", "/t", "0"])
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub fn bilin_power_off() {
+    #[cfg(windows)]
+    if bilin_shutdown_exe(&["/s", "/f", "/t", "0"]) {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(s) = std::process::Command::new("systemctl").arg("poweroff").status() {
+            if s.success() {
+                log::info!("bilin: shutdown by the peer (systemctl poweroff)");
+                return;
+            }
+        }
+    }
+    match system_shutdown::force_shutdown() {
+        Ok(_) => log::info!("Shutdown by the peer"),
+        Err(e) => log::error!("Failed to shutdown: {}", e),
+    }
+}
+
+/// 比邻：本机正被几个人远程（主界面据此自动收到托盘）。查不到返回 0。
+pub fn bilin_controlled_count() -> usize {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let Ok(rt) = hbb_common::tokio::runtime::Runtime::new() else {
+            return 0;
+        };
+        return rt.block_on(async {
+            let Ok(mut c) = crate::ipc::connect(1000, "").await else {
+                return 0;
+            };
+            // 只数连进本机的会话（本机去远程别人不算）
+            if c.send(&crate::ipc::Data::ControlledSessionCount(0)).await.is_err() {
+                return 0;
+            }
+            if let Ok(Some(crate::ipc::Data::ControlledSessionCount(n))) =
+                c.next_timeout(1000).await
+            {
+                return n;
+            }
+            0
+        });
+    }
+    #[allow(unreachable_code)]
+    0
+}
+
 pub fn bilin_self_ab_hash() -> String {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {

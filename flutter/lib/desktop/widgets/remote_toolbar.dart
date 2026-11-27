@@ -284,7 +284,8 @@ class ToolbarState {
             sessionId: sessionId, arg: kOptionHideToolbar),
       ]);
 
-      collapse.value = results[0] ?? false;
+      // 比邻：每次进入远程，工具栏默认收起，点顶部小按钮才展开（用户固定了工具栏的除外）
+      collapse.value = !_pin.value;
       hide.value = results[1] ?? false;
     } finally {
       _isInitializing = false;

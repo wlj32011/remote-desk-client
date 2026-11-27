@@ -984,8 +984,8 @@ class _ListView extends StatelessWidget {
         shrinkWrap: true,
         physics: const BouncingScrollPhysics(),
         children: isHideSingleItem()
-            ? List.empty()
-            : state.value.tabs.asMap().entries.map((e) {
+            ? <Widget>[]
+            : (state.value.tabs.asMap().entries.map<Widget>((e) {
                 final index = e.key;
                 final tab = e.value;
                 final label = labelGetter == null
@@ -1028,7 +1028,34 @@ class _ListView extends StatelessWidget {
                   onPanStart: (e) {},
                   child: child,
                 );
-              }).toList()));
+              }).toList()
+              ..addAll([
+                // 比邻：远程窗口标签最后一个是“＋”，点了调出程序主界面
+                if (controller.tabType == DesktopTabType.remoteScreen &&
+                    !isHideSingleItem())
+                  const _BilinAddTab(),
+              ]))));
+  }
+}
+
+class _BilinAddTab extends StatelessWidget {
+  const _BilinAddTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: '打开主界面',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => rustDeskWinManager.call(
+            WindowType.Main, kWindowMainWindowOnTop, ""),
+        child: SizedBox(
+          width: 34,
+          height: kDesktopRemoteTabBarHeight,
+          child: Icon(Icons.add, size: 20, color: MyTheme.tabbar(context).unSelectedIconColor),
+        ),
+      ),
+    );
   }
 }
 

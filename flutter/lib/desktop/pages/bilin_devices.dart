@@ -112,7 +112,8 @@ Future<void> bilinSyncAccountDevices() async {
 
 /// 从设备列表远程：本地缓存里对方还没有免密哈希（对方刚登录、刚升级）时，先重新拉一次地址簿再连，
 /// 这样不用等手动刷新就能免密。
-Future<void> bilinConnect(BuildContext context, String id) async {
+Future<void> bilinConnect(BuildContext context, String id,
+    {String? password}) async {
   final p = bilinAb()?.peers.firstWhereOrNull((e) => e.id == id);
   if (p != null && p.hash.isEmpty) {
     try {
@@ -129,7 +130,7 @@ Future<void> bilinConnect(BuildContext context, String id) async {
     await bind.mainSetPeerAlias(id: id, alias: alias);
   }
   if (!context.mounted) return;
-  connect(context, id);
+  connect(context, id, password: password);
 }
 
 // ================= 无窗口连接：重启 / 关机 =================
@@ -170,7 +171,8 @@ Future<String?> bilinPowerOne(String id, String action) async {
       } else {
         await bind.sessionToggleOption(sessionId: sid, value: 'bilin-shutdown');
       }
-      await Future.delayed(const Duration(milliseconds: 1500));
+      // 指令发出去就行，不用等对方回应（对方关机/重启后连接自然断开）
+      await Future.delayed(const Duration(milliseconds: 800));
       if (!done.isCompleted) done.complete(null);
     } else if (name == 'msgbox') {
       final type = '${m['type'] ?? ''}';
@@ -184,7 +186,7 @@ Future<String?> bilinPowerOne(String id, String action) async {
   });
   String? r;
   try {
-    r = await done.future.timeout(const Duration(seconds: 25));
+    r = await done.future.timeout(const Duration(seconds: 15));
   } on TimeoutException {
     r = '连接超时';
   }
@@ -733,9 +735,30 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
   Widget _batchBar(BuildContext context, List<Peer> shown) {
     final all = shown.isNotEmpty && _checked.length == shown.length;
     final picked = shown.where((p) => _checked.contains(p.id)).toList();
+    return LayoutBuilder(builder: (context, box) {
+    final compact = box.maxWidth < 520;
     Widget btn(String text, IconData icon, VoidCallback? onTap,
             {Color? color}) =>
-        Padding(
+        compact
+            ? Padding(
+                padding: const EdgeInsets.only(left: 6),
+                child: Tooltip(
+                  message: text,
+                  child: OutlinedButton(
+                    onPressed: picked.isEmpty ? null : onTap,
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(40, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      foregroundColor: color ?? BilinColors.text(context),
+                      side: BorderSide(color: BilinColors.border(context)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: Icon(icon, size: 18),
+                  ),
+                ),
+              )
+            : Padding(
           padding: const EdgeInsets.only(left: 8),
           child: OutlinedButton.icon(
             onPressed: picked.isEmpty ? null : onTap,
@@ -769,8 +792,12 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
           }),
           activeColor: BilinColors.brand,
         ),
-        Text('已选 ${picked.length} 台',
-            style: TextStyle(fontSize: 14, color: BilinColors.text(context))),
+        Flexible(
+          child: Text(compact ? '${picked.length} 台' : '已选 ${picked.length} 台',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 14, color: BilinColors.text(context))),
+        ),
         const Spacer(),
         btn('移到分组', Icons.drive_file_move_outline,
             () => _moveDialog(context, picked)),
@@ -780,6 +807,7 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
             color: const Color(0xFFDC2626)),
       ]),
     );
+    });
   }
 
   // ---------- 菜单和对话框 ----------
@@ -954,21 +982,12 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
     );
     if (!ok || !mounted) return;
     final results = <String, String?>{};
-    final progress = 0.obs;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        content: Obx(() => Row(children: [
-              const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(strokeWidth: 2.5)),
-              const SizedBox(width: 16),
-              Text('正在$word… ${progress.value}/${targets.length}'),
-            ])),
-      ),
-    );
+    // 后台执行，不挡界面：先退出批量模式，做完只弹一条结果提示
+    setState(() {
+      _batch = false;
+      _checked.clear();
+    });
+    showToast('正在后台$word ${targets.length} 台电脑');
     // 有设备缺免密哈希时先拉一次最新地址簿
     if (targets.any((p) => p.hash.isEmpty)) {
       try {
@@ -977,26 +996,23 @@ class _BilinDevicesPageState extends State<BilinDevicesPage> {
             .timeout(const Duration(seconds: 5));
       } catch (_) {}
     }
-    // 最多同时 4 台
+    // 最多同时 8 台
     final queue = [...targets];
     Future<void> worker() async {
       while (queue.isNotEmpty) {
         final p = queue.removeAt(0);
         results[p.id] = _isOn(p) ? await bilinPowerOne(p.id, action) : '离线';
-        progress.value++;
       }
     }
 
-    await Future.wait(List.generate(4, (_) => worker()));
-    if (!mounted) return;
-    Navigator.of(context, rootNavigator: true).pop();
+    await Future.wait(List.generate(8, (_) => worker()));
     final failed = targets.where((p) => results[p.id] != null).toList();
-    setState(() {
-      _batch = false;
-      _checked.clear();
-    });
     if (failed.isEmpty) {
       showToast('已向 ${targets.length} 台电脑发出$word指令');
+      return;
+    }
+    if (!mounted) {
+      showToast('$word：${failed.length} 台没成功');
       return;
     }
     await showDialog(

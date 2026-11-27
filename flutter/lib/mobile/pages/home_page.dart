@@ -49,14 +49,10 @@ class HomePageState extends State<HomePage> {
 
   void initPages() {
     _pages.clear();
-    // 比邻远程：远程 / 本机（安卓共享屏幕）/ 我的
-    if (!bind.isIncomingOnly()) {
-      _pages.add(BilinMobileRemotePage());
-    }
-    if (isAndroid && !bind.isOutgoingOnly()) {
-      _chatPageTabIndex = -1;
-      _pages.add(ServerPage());
-    }
+    // 比邻远程（0.6.3 起）：手机只做主控，不被控。远程（输识别码和密码）/ 设备（账号里的电脑）/ 我的
+    _chatPageTabIndex = -1;
+    _pages.add(BilinMobileRemotePage());
+    _pages.add(BilinMobileRemotePage(devices: true));
     _pages.add(BilinMobileMinePage());
   }
 

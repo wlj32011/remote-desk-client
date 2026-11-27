@@ -3955,20 +3955,24 @@ impl Connection {
                     Some(misc::Union::BilinShutdownRemoteDevice(_)) => {
                         #[cfg(any(target_os = "linux", target_os = "windows"))]
                         if self.restart {
-                            match system_shutdown::force_shutdown() {
-                                Ok(_) => log::info!("Shutdown by the peer"),
-                                Err(e) => log::error!("Failed to shutdown: {}", e),
-                            }
+                            crate::common::bilin_power_off();
                         }
                     }
                     Some(misc::Union::RestartRemoteDevice(_)) => {
                         #[cfg(not(any(target_os = "android", target_os = "ios")))]
                         if self.restart {
+                            // 比邻：Windows 先用 shutdown.exe /r，失败再走原来的接口
+                            #[cfg(windows)]
+                            let bilin_done = crate::common::bilin_power_restart();
+                            #[cfg(not(windows))]
+                            let bilin_done = false;
                             // force_reboot, not work on linux vm and macos 14
                             #[cfg(any(target_os = "linux", target_os = "windows"))]
+                            if !bilin_done {
                             match system_shutdown::force_reboot() {
                                 Ok(_) => log::info!("Restart by the peer"),
                                 Err(e) => log::error!("Failed to restart: {}", e),
+                            }
                             }
                             #[cfg(any(target_os = "linux", target_os = "macos"))]
                             match system_shutdown::reboot() {

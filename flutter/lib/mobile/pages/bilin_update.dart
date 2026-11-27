@@ -53,7 +53,8 @@ class BilinAndroidUpdater {
     return false;
   }
 
-  static Future<void> check() async {
+  static Future<void> check({bool manual = false}) async {
+    if (manual) _dismissed = '';
     if (_busy) return;
     // App 在后台、或者正被别人远程控制时不打扰
     if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
@@ -76,7 +77,11 @@ class BilinAndroidUpdater {
       if (ver.isEmpty || !url.startsWith(_prefix) || !url.endsWith('.apk')) {
         return;
       }
-      if (!_newer(ver, cur) || ver == _dismissed) return;
+      if (!_newer(ver, cur)) {
+        if (manual) showToast('已经是最新版本（$cur）');
+        return;
+      }
+      if (ver == _dismissed) return;
       final ctx = globalKey.currentContext;
       if (ctx == null) return;
       final ok = await showDialog<bool>(

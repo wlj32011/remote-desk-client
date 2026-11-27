@@ -2773,6 +2773,9 @@ pub fn main_get_common(key: String) -> String {
     if key == "bilin-self-ab-hash" {
         return crate::common::bilin_self_ab_hash();
     }
+    if key == "bilin-controlled-count" {
+        return crate::common::bilin_controlled_count().to_string();
+    }
     if key == "is-printer-installed" {
         #[cfg(target_os = "windows")]
         {

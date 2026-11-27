@@ -424,7 +424,6 @@ pub enum Data {
     #[cfg(windows)]
     SyncWinCpuUsage(Option<f64>),
     FileTransferLog((String, String)),
-    #[cfg(windows)]
     ControlledSessionCount(usize),
     CmErr(String),
     // CM-side file reading responses (Windows only)
@@ -1200,7 +1199,6 @@ async fn handle(data: Data, stream: &mut Connection) {
                     .await
             );
         }
-        #[cfg(windows)]
         Data::ControlledSessionCount(_) => {
             allow_err!(
                 stream

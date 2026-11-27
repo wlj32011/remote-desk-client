@@ -18,13 +18,19 @@ import 'package:get/get.dart';
 // ================= 远程 =================
 
 class BilinMobileRemotePage extends StatefulWidget implements PageShape {
-  BilinMobileRemotePage({Key? key}) : super(key: key);
+  /// devices=false：“远程”页（输识别码、密码）；true：“设备”页（账号里的电脑）
+  BilinMobileRemotePage({Key? key, this.devices = false})
+      : title = devices ? '设备' : '远程',
+        icon = Icon(devices ? Icons.devices_outlined : Icons.desktop_windows_outlined),
+        super(key: key);
+
+  final bool devices;
 
   @override
-  final String title = '远程';
+  final String title;
 
   @override
-  final Widget icon = const Icon(Icons.desktop_windows_outlined);
+  final Widget icon;
 
   @override
   final List<Widget> appBarActions = const [];
@@ -35,6 +41,8 @@ class BilinMobileRemotePage extends StatefulWidget implements PageShape {
 
 class _BilinMobileRemotePageState extends State<BilinMobileRemotePage> {
   final _id = TextEditingController();
+  final _pw = TextEditingController();
+  bool _showPw = false;
   String _group = 'default';
   String _myId = '';
   final Map<String, bool> _online = {};
@@ -46,6 +54,11 @@ class _BilinMobileRemotePageState extends State<BilinMobileRemotePage> {
   void initState() {
     super.initState();
     bind.mainGetMyId().then((v) => setState(() => _myId = v));
+    if (!widget.devices) {
+      // 安卓自动升级：打开后查一次，之后每小时查一次
+      BilinAndroidUpdater.start();
+      return;
+    }
     platformFFI.registerEventHandler('callback_query_onlines', _onlineHandler,
         (evt) async {
       for (final id in '${evt['onlines'] ?? ''}'.split(',')) {
@@ -62,16 +75,17 @@ class _BilinMobileRemotePageState extends State<BilinMobileRemotePage> {
       if ('$v'.isNotEmpty) _refresh();
     });
     _timer = Timer.periodic(const Duration(seconds: 30), (_) => _queryOnline());
-    // 安卓自动升级：打开后查一次，之后每小时查一次
-    BilinAndroidUpdater.start();
   }
 
   @override
   void dispose() {
     _timer?.cancel();
     _loginWorker?.dispose();
-    platformFFI.unregisterEventHandler('callback_query_onlines', _onlineHandler);
+    if (widget.devices) {
+      platformFFI.unregisterEventHandler('callback_query_onlines', _onlineHandler);
+    }
     _id.dispose();
+    _pw.dispose();
     super.dispose();
   }
 
@@ -110,7 +124,8 @@ class _BilinMobileRemotePageState extends State<BilinMobileRemotePage> {
       return;
     }
     FocusScope.of(context).unfocus();
-    bilinConnect(context, id);
+    final pw = _pw.text.trim();
+    bilinConnect(context, id, password: pw.isEmpty ? null : pw);
   }
 
   @override
@@ -122,8 +137,13 @@ class _BilinMobileRemotePageState extends State<BilinMobileRemotePage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
           children: [
-            _connectCard(context),
-            const SizedBox(height: 22),
+            if (!widget.devices) ...[
+              _connectCard(context),
+              const SizedBox(height: 16),
+              Text('对方电脑打开比邻远程后，把“本机识别码”和“临时密码”告诉你。'
+                  '同一个账号下的电脑不用输密码，在“设备”里点一下就能连。',
+                  style: TextStyle(fontSize: 13, height: 1.5, color: BilinColors.sub(context))),
+            ] else
             Obx(() {
               // 订阅：登录状态、地址簿内容
               final login = gFFI.userModel.userName.value.isNotEmpty;
@@ -184,6 +204,31 @@ class _BilinMobileRemotePageState extends State<BilinMobileRemotePage> {
             ),
           ),
           const SizedBox(height: 12),
+          TextField(
+            controller: _pw,
+            obscureText: !_showPw,
+            textInputAction: TextInputAction.go,
+            onSubmitted: (_) => _connect(),
+            style: TextStyle(fontSize: 16, color: BilinColors.text(context)),
+            decoration: InputDecoration(
+              hintText: '密码（同账号的电脑可不填）',
+              hintStyle: TextStyle(fontSize: 15, color: BilinColors.sub(context)),
+              filled: true,
+              fillColor: BilinColors.field(context),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              suffixIcon: IconButton(
+                icon: Icon(_showPw
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined),
+                onPressed: () => setState(() => _showPw = !_showPw),
+              ),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none),
+            ),
+          ),
+          const SizedBox(height: 14),
           SizedBox(
             height: 48,
             child: ElevatedButton(
@@ -398,6 +443,11 @@ class BilinMobileMinePage extends StatefulWidget implements PageShape {
 
 class _BilinMobileMinePageState extends State<BilinMobileMinePage>
     with WidgetsBindingObserver {
+  String _quality = (() {
+    final v = bind.mainGetUserDefaultOption(key: 'image_quality');
+    return ['best', 'balanced', 'low'].contains(v) ? v : 'balanced';
+  })();
+
   String _version = '';
   String _myId = '';
   bool _ignoreBattery = false;
@@ -439,31 +489,30 @@ class _BilinMobileMinePageState extends State<BilinMobileMinePage>
           Obx(() => _account(context, gFFI.userModel.userName.value)),
           const SizedBox(height: 16),
           _section(context, [
-            if (isAndroid)
-              _tile(
-                context,
-                Icons.battery_charging_full_outlined,
-                '保持后台运行',
-                sub: '让电脑随时能连上这台手机',
-                trailing: Switch(
-                  value: _ignoreBattery,
-                  activeColor: BilinColors.brand,
+            _tile(context, Icons.high_quality_outlined, '远程画质',
+                sub: '流量少选“流畅”，看得清选“清晰”',
+                trailing: DropdownButton<String>(
+                  value: _quality,
+                  underline: const SizedBox.shrink(),
+                  items: const [
+                    DropdownMenuItem(value: 'best', child: Text('清晰')),
+                    DropdownMenuItem(value: 'balanced', child: Text('均衡')),
+                    DropdownMenuItem(value: 'low', child: Text('流畅')),
+                  ],
                   onChanged: (v) async {
-                    if (v) {
-                      await AndroidPermissionManager.request(
-                          kRequestIgnoreBatteryOptimizations);
-                    } else {
-                      AndroidPermissionManager.startAction(
-                          kActionApplicationDetailsSettings);
-                    }
-                    _checkBattery();
+                    if (v == null) return;
+                    await bind.mainSetUserDefaultOption(
+                        key: 'image_quality', value: v);
+                    setState(() => _quality = v);
                   },
-                ),
+                )),
+            if (isAndroid)
+              InkWell(
+                onTap: () => BilinAndroidUpdater.check(manual: true),
+                child: _tile(context, Icons.system_update_outlined, '检查更新',
+                    trailing: Icon(Icons.chevron_right,
+                        color: BilinColors.sub(context))),
               ),
-            _tile(context, Icons.badge_outlined, '本机识别码',
-                trailing: Text(groupId(_myId),
-                    style: TextStyle(
-                        fontSize: 14, color: BilinColors.sub(context)))),
             _tile(context, Icons.info_outline, '版本',
                 trailing: Text(_version,
                     style: TextStyle(
